@@ -1,12 +1,12 @@
-# Nunca versionar dados de alunos, banco, fotos nem PDFs de atas
-*.db
-*.db-journal
-fotos/
-uploads/
-*.pdf
+# Nunca versionar dados de alunos, senhas ou atas
+node_modules/
+.netlify/
 .env
+*.db
+fotos/
+*.pdf
 
 # Build
-build/
+dist/
 .gradle/
-*.class
+build/

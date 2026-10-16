@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administração - Eleição de Representantes</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/admin.js"></script>
+</head>
+<body>
+  <main class="admin">
+    <h1>Eleição de representantes — professor</h1>
+
+    <section id="tela-login-prof" hidden>
+      <form id="form-login-prof" class="formulario">
+        <label>Senha do professor <input id="senha-prof" type="password" required></label>
+        <button type="submit" class="btn-primario">Entrar</button>
+        <p id="erro-login-prof" class="erro" role="alert"></p>
+      </form>
+    </section>
+
+    <section id="painel" hidden>
+      <button id="btn-sair-prof" class="link">Sair</button>
+      <p id="msg" role="status"></p>
+
+      <h2>Turma</h2>
+      <form id="form-turma" class="formulario">
+        <label>Nome <input name="nome" required placeholder="TGT4"></label>
+        <label>Curso <input name="curso" required></label>
+        <label>Oferta <input name="oferta"></label>
+        <label>Horário <input name="horario" placeholder="NOITE"></label>
+        <button type="submit" class="btn-primario">Cadastrar turma</button>
+      </form>
+
+      <h2>Aluno (com foto)</h2>
+      <form id="form-aluno" class="formulario">
+        <label>Turma <select id="sel-turma-aluno" name="turmaId" required></select></label>
+        <label>Matrícula <input name="matricula" required></label>
+        <label>Nome completo <input name="nome" required></label>
+        <label>Senha inicial (mín. 6) <input name="senha" type="password" required minlength="6"></label>
+        <label>E-mail <input name="email" type="email"></label>
+        <label>Celular <input name="celular"></label>
+        <label>Foto <input name="foto" type="file" accept="image/jpeg,image/png,image/webp"></label>
+        <button type="submit" class="btn-primario">Cadastrar aluno</button>
+      </form>
+
+      <h2>Eleição</h2>
+      <form id="form-eleicao" class="formulario">
+        <label>Turma <select id="sel-turma-eleicao" name="turmaId" required></select></label>
+        <label>Data da eleição <input name="dataEleicao" type="date" required></label>
+        <label>Início do mandato <input name="mandatoInicio" type="date" required></label>
+        <label>Fim do mandato <input name="mandatoFim" type="date" required></label>
+        <button type="submit" class="btn-primario">Criar eleição</button>
+      </form>
+
+      <h2>Ações da eleição</h2>
+      <label>ID da eleição <input id="eleicao-id"></label>
+      <div class="acoes">
+        <button data-acao="abrir">Abrir votação</button>
+        <button data-acao="progresso">Ver progresso</button>
+        <button data-acao="encerrar">Encerrar votação</button>
+      </div>
+
+      <form id="form-candidato" class="formulario">
+        <h3>Definir candidato (antes de abrir)</h3>
+        <label>Matrícula do candidato <input name="matricula" required></label>
+        <label>Número na urna <input name="numero" type="number" min="1" max="99" required></label>
+        <button type="submit" class="btn-primario">Definir candidato</button>
+      </form>
+
+      <h2>Eleições</h2>
+      <ul id="lista-eleicoes"></ul>
+    </section>
+  </main>
+</body>
+</html>

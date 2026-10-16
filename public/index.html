@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Urna - Representantes Estudantis</title>
+  <link rel="stylesheet" href="/css/app.css">
+  <script type="module" src="/js/urna.js"></script>
+</head>
+<body class="urna-corpo">
+  <main class="urna">
+    <header class="urna-cabecalho">
+      <span>SENAC · ELEIÇÃO DE REPRESENTANTES</span>
+      <button id="btn-sair" class="link" hidden>Sair</button>
+    </header>
+
+    <!-- Login do aluno -->
+    <section id="tela-login" class="tela" hidden>
+      <h1>Identificação do eleitor</h1>
+      <form id="form-login" class="formulario">
+        <label>Matrícula <input id="matricula" required autocomplete="username" inputmode="numeric"></label>
+        <label>Senha <input id="senha" type="password" required autocomplete="current-password"></label>
+        <button type="submit" class="btn-primario">Entrar</button>
+        <p id="login-erro" class="erro" role="alert"></p>
+      </form>
+    </section>
+
+    <!-- Tela da urna -->
+    <section id="tela-urna" class="tela" hidden>
+      <div class="visor">
+        <p class="visor-titulo">SEU VOTO PARA</p>
+        <p id="visor-numero" class="visor-numero">__</p>
+        <div id="visor-candidato" class="visor-candidato" hidden>
+          <img id="visor-foto" alt="Foto do candidato" hidden>
+          <p id="visor-nome"></p>
+        </div>
+        <p id="visor-branco" class="visor-branco" hidden>VOTO EM BRANCO</p>
+      </div>
+
+      <details class="lista-referencia">
+        <summary>Candidatos e números</summary>
+        <ul id="lista-candidatos"></ul>
+      </details>
+
+      <div class="teclado" role="group" aria-label="Teclado da urna">
+        <button data-tecla="1">1</button><button data-tecla="2">2</button><button data-tecla="3">3</button>
+        <button data-tecla="4">4</button><button data-tecla="5">5</button><button data-tecla="6">6</button>
+        <button data-tecla="7">7</button><button data-tecla="8">8</button><button data-tecla="9">9</button>
+        <button data-tecla="BRANCO" class="tecla-branco">BRANCO</button>
+        <button data-tecla="0">0</button>
+        <button data-tecla="CORRIGE" class="tecla-corrige">CORRIGE</button>
+      </div>
+      <button id="btn-confirma" class="tecla-confirma">CONFIRMA</button>
+      <p id="aviso" class="aviso" role="status"></p>
+    </section>
+
+    <!-- Fim -->
+    <section id="tela-fim" class="tela" hidden>
+      <h1>FIM</h1>
+      <p id="fim-texto">Voto registrado. Você já pode deixar a sala.</p>
+      <button id="btn-sair-fim" class="link" onclick="location.reload()">Voltar</button>
+    </section>
+  </main>
+</body>
+</html>
