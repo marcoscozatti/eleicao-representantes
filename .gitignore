@@ -1,0 +1,12 @@
+# Nunca versionar dados de alunos, banco, fotos nem PDFs de atas
+*.db
+*.db-journal
+fotos/
+uploads/
+*.pdf
+.env
+
+# Build
+build/
+.gradle/
+*.class

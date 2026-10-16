@@ -1,0 +1,23 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  datasource:
+    url: jdbc:sqlite:${DB_PATH:/data/eleicao.db}
+    driver-class-name: org.sqlite.JDBC
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 2MB
+
+eleicao:
+  # Senha do professor/administrador (definida como variável de ambiente no Render)
+  admin-password: ${ADMIN_PASSWORD:troque-esta-senha}
+  # Pasta onde as fotos dos alunos ficam (disco persistente no Render)
+  fotos-dir: ${FOTOS_DIR:/data/fotos}
+  # Origem do frontend no Netlify (para CORS)
+  frontend-origin: ${FRONTEND_ORIGIN:http://localhost:5173}

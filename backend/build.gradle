@@ -1,0 +1,34 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'br.senac'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+def springVersion = '6.1.14'
+def springBootVersion = '3.3.5'
+
+dependencies {
+    implementation "org.springframework.boot:spring-boot:${springBootVersion}"
+    implementation "org.springframework.boot:spring-boot-autoconfigure:${springBootVersion}"
+    implementation "org.springframework.boot:spring-boot-starter-web:${springBootVersion}"
+    implementation "org.springframework.boot:spring-boot-starter-jdbc:${springBootVersion}"
+    implementation "org.springframework.security:spring-security-crypto:6.3.4"
+    implementation "org.xerial:sqlite-jdbc:3.46.1.3"
+    implementation "org.apache.pdfbox:pdfbox:3.0.3"
+}
+
+application {
+    mainClass = 'br.senac.eleicao.EleicaoApplication'
+}
