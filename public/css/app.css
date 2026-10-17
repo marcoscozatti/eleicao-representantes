@@ -176,3 +176,7 @@ input, select {
 .acoes-botao {
   padding: 10px 14px; border: 0; border-radius: 6px; background: var(--laranja); color: #fff; cursor: pointer; width: fit-content;
 }
+
+.acoes-perigo {
+  padding: 10px 14px; border: 0; border-radius: 6px; background: var(--vermelho); color: #fff; cursor: pointer; width: fit-content;
+}

@@ -327,6 +327,20 @@ $("form-fotos").addEventListener("submit", async (ev) => {
   ev.target.reset();
 });
 
+$("btn-apagar-tudo").addEventListener("click", async () => {
+  const digitado = prompt('Para apagar TODOS os dados, digite exatamente: APAGAR TUDO');
+  if (digitado !== "APAGAR TUDO") return msg("Operação cancelada.", false);
+  try {
+    const r = await api("admin/apagar-tudo", { metodo: "POST", token, corpo: { confirmacao: digitado } });
+    sessionStorage.removeItem(TOKEN_KEY);
+    token = null;
+    alert(`${r.apagados} registro(s) apagado(s). Entre novamente.`);
+    mostrarPainel(false);
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
 async function iniciar() {
   mostrarPainel(true);
   await carregarTurmas().catch((e) => msg(e.message, false));

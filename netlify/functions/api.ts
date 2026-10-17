@@ -415,6 +415,19 @@ async function votar(req: Request, s: Sessao | null) {
   return json({ ok: true, mensagem: "Voto registrado" }, 201);
 }
 
+// Apaga TODOS os dados (alunos, fotos, turmas, eleições, votos e sessões).
+// Exige confirmação digitada, para evitar apagamento por engano.
+async function apagarTudo(req: Request, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const { confirmacao } = await corpo<{ confirmacao?: string }>(req);
+  if (confirmacao !== "APAGAR TUDO") return erro("Confirmação incorreta", 400);
+
+  const todas = await store().list();
+  const chavesTodas = todas.blobs.map((b) => b.key);
+  await Promise.all(chavesTodas.map((k) => store().delete(k)));
+  return json({ apagados: chavesTodas.length });
+}
+
 // ---------- Roteamento ----------
 export default async (req: Request, _context: Context) => {
   const url = new URL(req.url);
@@ -426,6 +439,9 @@ export default async (req: Request, _context: Context) => {
   if (metodo === "POST" && caminho === "auth/professor") return loginProfessor(req);
   if (metodo === "POST" && caminho === "auth/aluno") return loginAluno(req);
   if (metodo === "POST" && caminho === "auth/logout") return logout(req);
+
+  // Apagar tudo (professor)
+  if (caminho === "admin/apagar-tudo" && metodo === "POST") return apagarTudo(req, s);
 
   // Turmas
   if (caminho === "turmas" && metodo === "POST") return criarTurma(req, s);
