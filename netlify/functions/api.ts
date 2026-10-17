@@ -181,6 +181,24 @@ async function enviarFoto(matricula: string, req: Request, s: Sessao | null) {
   }
 }
 
+// Gera novas senhas para todos os alunos de uma turma (útil quando a lista foi perdida).
+async function novasSenhasDaTurma(turmaId: string, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const alunos = await Promise.all(
+    (await chaves("aluno/")).map((k) => store().get(k, { type: "json" }) as Promise<any>)
+  );
+  const daTurma = alunos.filter((a) => a.turmaId === turmaId);
+  if (daTurma.length === 0) return erro("Nenhum aluno nesta turma", 404);
+
+  const resultados: { matricula: string; nome: string; senha: string }[] = [];
+  for (const a of daTurma) {
+    const senha = gerarSenha();
+    await store().setJSON(`aluno/${a.matricula}`, { ...a, senhaHash: await bcrypt.hash(senha, 10) });
+    resultados.push({ matricula: a.matricula, nome: a.nome, senha });
+  }
+  return json({ total: resultados.length, resultados });
+}
+
 // ---------- Alunos (professor) ----------
 async function cadastrarAluno(req: Request, s: Sessao | null) {
   if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
@@ -412,6 +430,8 @@ export default async (req: Request, _context: Context) => {
   // Turmas
   if (caminho === "turmas" && metodo === "POST") return criarTurma(req, s);
   if (caminho === "turmas" && metodo === "GET") return listarTurmas(s);
+  const mSenhas = caminho.match(/^turmas\/([^/]+)\/senhas$/);
+  if (mSenhas && metodo === "POST") return novasSenhasDaTurma(decodeURIComponent(mSenhas[1]), s);
 
   // Alunos
   if (caminho === "alunos" && metodo === "POST") return cadastrarAluno(req, s);

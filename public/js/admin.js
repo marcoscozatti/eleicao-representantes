@@ -263,6 +263,22 @@ $("btn-baixar-senhas").addEventListener("click", () => {
   baixarCsv("senhas-alunos.csv", linhas);
 });
 
+$("btn-novas-senhas").addEventListener("click", async () => {
+  const turmaId = $("sel-turma-import").value;
+  if (!turmaId) return msg("Escolha a turma.", false);
+  if (!confirm("Isso troca a senha de TODOS os alunos desta turma. Continuar?")) return;
+  try {
+    const r = await api(`turmas/${encodeURIComponent(turmaId)}/senhas`, { metodo: "POST", token });
+    ultimasSenhas = r.resultados;
+    $("resumo-import").textContent = `Novas senhas geradas para ${r.total} aluno(s).`;
+    $("erros-import").innerHTML = "";
+    $("resultado-import").hidden = false;
+    msg("Senhas geradas. Baixe a lista agora.");
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
 $("form-fotos").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const arquivos = Array.from(ev.target.fotos.files);
