@@ -3,7 +3,7 @@
 import type { Config, Context } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
 import bcrypt from "bcryptjs";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 
 // ---------- Configuração ----------
 const SESSAO_HORAS = 12;
@@ -107,6 +107,80 @@ async function listarTurmas(s: Sessao | null) {
   return json(turmas);
 }
 
+// ---------- Senhas e fotos ----------
+// Alfabeto sem caracteres parecidos (0/O, 1/l/I) para facilitar a leitura no papel.
+const ALFABETO_SENHA = "abcdefghjkmnpqrstuvwxyz23456789";
+function gerarSenha(tamanho = 8): string {
+  let senha = "";
+  for (let i = 0; i < tamanho; i++) senha += ALFABETO_SENHA[randomInt(ALFABETO_SENHA.length)];
+  return senha;
+}
+
+async function salvarFoto(matricula: string, foto: { contentType: string; base64: string }) {
+  if (!FOTO_TIPOS.includes(foto.contentType)) throw new Error("A foto deve ser JPEG, PNG ou WebP");
+  const bytes = Buffer.from(foto.base64, "base64");
+  if (bytes.length > FOTO_MAX_BYTES) throw new Error("Foto maior que 2 MB");
+  const key = `foto/${matricula}`;
+  await store().set(key, new Blob([bytes]), { metadata: { contentType: foto.contentType } });
+  return key;
+}
+
+// Importação em massa: cria vários alunos da mesma turma e gera senha aleatória para cada um.
+// As senhas são devolvidas UMA vez, na resposta; o sistema guarda só o hash.
+async function importarAlunos(req: Request, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const { turmaId, alunos } = await corpo<{
+    turmaId?: string;
+    alunos?: { matricula?: string; nome?: string; email?: string; celular?: string }[];
+  }>(req);
+  if (!turmaId) return erro("Turma é obrigatória", 400);
+  if (!Array.isArray(alunos) || alunos.length === 0) return erro("Nenhum aluno enviado", 400);
+  if (alunos.length > 200) return erro("Envie no máximo 200 alunos por vez", 400);
+
+  const resultados: { matricula: string; nome: string; senha?: string; erro?: string }[] = [];
+  for (const a of alunos) {
+    const matricula = (a.matricula ?? "").trim();
+    const nome = (a.nome ?? "").trim();
+    if (!matricula || !nome) {
+      resultados.push({ matricula, nome, erro: "Matrícula e nome são obrigatórios" });
+      continue;
+    }
+    if (await store().get(`aluno/${matricula}`)) {
+      resultados.push({ matricula, nome, erro: "Matrícula já cadastrada" });
+      continue;
+    }
+    const senha = gerarSenha();
+    await store().setJSON(`aluno/${matricula}`, {
+      matricula,
+      turmaId,
+      nome,
+      email: a.email?.trim() || null,
+      celular: a.celular?.trim() || null,
+      senhaHash: await bcrypt.hash(senha, 10),
+      fotoKey: null,
+    });
+    resultados.push({ matricula, nome, senha });
+  }
+  return json({
+    criados: resultados.filter((r) => r.senha).length,
+    resultados,
+  }, 201);
+}
+
+async function enviarFoto(matricula: string, req: Request, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const aluno = (await store().get(`aluno/${matricula}`, { type: "json" })) as any;
+  if (!aluno) return erro("Aluno não encontrado", 404);
+  const foto = await corpo<{ contentType: string; base64: string }>(req);
+  try {
+    const key = await salvarFoto(matricula, foto);
+    await store().setJSON(`aluno/${matricula}`, { ...aluno, fotoKey: key });
+    return json({ matricula, ok: true }, 201);
+  } catch (e) {
+    return erro((e as Error).message, 400);
+  }
+}
+
 // ---------- Alunos (professor) ----------
 async function cadastrarAluno(req: Request, s: Sessao | null) {
   if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
@@ -129,13 +203,11 @@ async function cadastrarAluno(req: Request, s: Sessao | null) {
 
   let fotoKey: string | null = null;
   if (dados.foto) {
-    if (!FOTO_TIPOS.includes(dados.foto.contentType)) {
-      return erro("A foto deve ser JPEG, PNG ou WebP", 400);
+    try {
+      fotoKey = await salvarFoto(matricula, dados.foto);
+    } catch (e) {
+      return erro((e as Error).message, 400);
     }
-    const bytes = Buffer.from(dados.foto.base64, "base64");
-    if (bytes.length > FOTO_MAX_BYTES) return erro("Foto maior que 2 MB", 400);
-    fotoKey = `foto/${matricula}`;
-    await store().set(fotoKey, new Blob([bytes]), { metadata: { contentType: dados.foto.contentType } });
   }
 
   await store().setJSON(`aluno/${matricula}`, {
@@ -343,6 +415,9 @@ export default async (req: Request, _context: Context) => {
 
   // Alunos
   if (caminho === "alunos" && metodo === "POST") return cadastrarAluno(req, s);
+  if (caminho === "alunos/importar" && metodo === "POST") return importarAlunos(req, s);
+  const mFotoAluno = caminho.match(/^alunos\/([^/]+)\/foto$/);
+  if (mFotoAluno && metodo === "POST") return enviarFoto(decodeURIComponent(mFotoAluno[1]), req, s);
   if (caminho === "alunos" && metodo === "GET") return listarAlunos(req, s);
 
   // Fotos

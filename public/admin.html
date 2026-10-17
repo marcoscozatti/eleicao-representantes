@@ -44,6 +44,28 @@
         <button type="submit" class="btn-primario">Cadastrar aluno</button>
       </form>
 
+      <h2>Importar alunos em massa (planilha CSV)</h2>
+      <form id="form-importar" class="formulario">
+        <label>Turma <select id="sel-turma-import" name="turmaId" required></select></label>
+        <label>Planilha CSV <input name="arquivo" type="file" accept=".csv,text/csv" required></label>
+        <p class="ajuda">Colunas aceitas: <code>matricula</code>, <code>nome</code> (obrigatórias), <code>email</code> e <code>celular</code> (opcionais). Os nomes das colunas podem estar em maiúsculas.</p>
+        <button type="submit" class="btn-primario">Importar alunos</button>
+      </form>
+      <div id="resultado-import" hidden>
+        <p id="resumo-import"></p>
+        <button id="btn-baixar-senhas" class="acoes-botao">Baixar lista de senhas (CSV)</button>
+        <p class="aviso-senha">As senhas aparecem só agora. Baixe, imprima ou repasse aos alunos. Depois disso não é possível vê-las de novo.</p>
+        <ul id="erros-import"></ul>
+      </div>
+
+      <h2>Fotos em massa</h2>
+      <form id="form-fotos" class="formulario">
+        <label>Fotos <input name="fotos" type="file" accept="image/jpeg,image/png,image/webp" multiple required></label>
+        <p class="ajuda">Nomeie cada arquivo com a matrícula do aluno, por exemplo <code>1143610633.jpg</code>.</p>
+        <button type="submit" class="btn-primario">Enviar fotos</button>
+        <p id="resumo-fotos" role="status"></p>
+      </form>
+
       <h2>Eleição</h2>
       <form id="form-eleicao" class="formulario">
         <label>Turma <select id="sel-turma-eleicao" name="turmaId" required></select></label>

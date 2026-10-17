@@ -16,7 +16,7 @@ function msg(texto, ok = true) {
 
 async function carregarTurmas() {
   const turmas = await api("turmas", { token });
-  const selects = ["sel-turma-aluno", "sel-turma-eleicao"];
+  const selects = ["sel-turma-aluno", "sel-turma-eleicao", "sel-turma-import"];
   for (const id of selects) {
     const s = $(id);
     s.innerHTML = turmas.map((t) => `<option value="${t.id}">${t.nome} - ${t.curso}</option>`).join("");
@@ -151,6 +151,122 @@ $("form-candidato").addEventListener("submit", async (ev) => {
   } catch (err) {
     msg(err.message, false);
   }
+});
+
+
+// ---------- Importação em massa ----------
+const NORMALIZAR = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+
+// Lê o arquivo como UTF-8; se não for UTF-8 (comum no Excel do Windows), usa Windows-1252.
+function lerTexto(arquivo) {
+  return arquivo.arrayBuffer().then((buf) => {
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(buf);
+    } catch {
+      return new TextDecoder("windows-1252").decode(buf);
+    }
+  });
+}
+
+// Separa uma linha CSV respeitando aspas. Aceita ";" ou "," como separador.
+function separarLinha(linha, sep) {
+  const campos = [];
+  let atual = "", aspas = false;
+  for (let i = 0; i < linha.length; i++) {
+    const c = linha[i];
+    if (c === '"') {
+      if (aspas && linha[i + 1] === '"') { atual += '"'; i++; }
+      else aspas = !aspas;
+    } else if (c === sep && !aspas) {
+      campos.push(atual.trim()); atual = "";
+    } else {
+      atual += c;
+    }
+  }
+  campos.push(atual.trim());
+  return campos;
+}
+
+function lerAlunosDoCsv(texto) {
+  const linhas = texto.split(/\r?\n/).filter((l) => l.trim() !== "");
+  if (linhas.length < 2) throw new Error("A planilha precisa ter cabeçalho e pelo menos um aluno.");
+  const sep = linhas[0].split(";").length > linhas[0].split(",").length ? ";" : ",";
+  const cabecalho = separarLinha(linhas[0], sep).map(NORMALIZAR);
+  const idx = (nome) => cabecalho.indexOf(nome);
+  if (idx("matricula") < 0 || idx("nome") < 0) {
+    throw new Error("A planilha precisa das colunas 'matricula' e 'nome'.");
+  }
+  return linhas.slice(1).map((linha) => {
+    const c = separarLinha(linha, sep);
+    const pegar = (nome) => (idx(nome) >= 0 ? c[idx(nome)] ?? "" : "");
+    return { matricula: pegar("matricula"), nome: pegar("nome"), email: pegar("email"), celular: pegar("celular") };
+  });
+}
+
+function baixarCsv(nomeArquivo, linhas) {
+  // BOM (\ufeff) faz o Excel abrir acentos corretamente
+  const conteudo = "\ufeff" + linhas.join("\r\n");
+  const url = URL.createObjectURL(new Blob([conteudo], { type: "text/csv;charset=utf-8" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = nomeArquivo; a.click();
+  URL.revokeObjectURL(url);
+}
+
+let ultimasSenhas = [];
+
+$("form-importar").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  const arquivo = f.get("arquivo");
+  try {
+    const alunos = lerAlunosDoCsv(await lerTexto(arquivo));
+    const r = await api("alunos/importar", {
+      metodo: "POST",
+      token,
+      corpo: { turmaId: f.get("turmaId"), alunos },
+    });
+    ultimasSenhas = r.resultados.filter((x) => x.senha);
+    $("resumo-import").textContent = `${r.criados} de ${alunos.length} aluno(s) cadastrado(s).`;
+    $("erros-import").innerHTML = r.resultados
+      .filter((x) => x.erro)
+      .map((x) => `<li>${x.matricula || "(sem matrícula)"} ${x.nome}: ${x.erro}</li>`)
+      .join("");
+    $("resultado-import").hidden = false;
+    msg("Importação concluída.");
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
+$("btn-baixar-senhas").addEventListener("click", () => {
+  const linhas = ["matricula;nome;senha", ...ultimasSenhas.map((x) => `${x.matricula};"${x.nome}";${x.senha}`)];
+  baixarCsv("senhas-alunos.csv", linhas);
+});
+
+$("form-fotos").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const arquivos = Array.from(ev.target.fotos.files);
+  let ok = 0;
+  const falhas = [];
+  for (const arq of arquivos) {
+    const matricula = arq.name.replace(/\.[^.]+$/, "").trim();
+    try {
+      const base64 = await new Promise((resolve, reject) => {
+        const leitor = new FileReader();
+        leitor.onload = () => resolve(String(leitor.result).split(",")[1]);
+        leitor.onerror = reject;
+        leitor.readAsDataURL(arq);
+      });
+      await api(`alunos/${encodeURIComponent(matricula)}/foto`, {
+        metodo: "POST", token, corpo: { contentType: arq.type, base64 },
+      });
+      ok++;
+    } catch (err) {
+      falhas.push(`${arq.name}: ${err.message}`);
+    }
+  }
+  $("resumo-fotos").textContent = `${ok} foto(s) enviada(s).` + (falhas.length ? ` Falhas: ${falhas.join("; ")}` : "");
+  ev.target.reset();
 });
 
 async function iniciar() {

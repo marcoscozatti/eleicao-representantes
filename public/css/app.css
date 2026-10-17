@@ -170,3 +170,9 @@ input, select {
   .teclado button { height: 56px; font-size: 22px; }
   .visor-numero { font-size: 46px; }
 }
+
+.ajuda { font-size: 14px; color: #444; margin: 0; }
+.aviso-senha { font-size: 14px; color: var(--vermelho); font-weight: 700; }
+.acoes-botao {
+  padding: 10px 14px; border: 0; border-radius: 6px; background: var(--laranja); color: #fff; cursor: pointer; width: fit-content;
+}
