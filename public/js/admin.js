@@ -187,19 +187,39 @@ function separarLinha(linha, sep) {
   return campos;
 }
 
+// Nomes aceitos para cada coluna (inclui os usados na exportação do sistema do Senac).
+const ALIASES = {
+  matricula: ["matricula", "matrícula", "id"],
+  nome: ["nome", "nome completo"],
+  email: ["email", "e-mail"],
+  celular: ["celular", "telefone"],
+};
+
 function lerAlunosDoCsv(texto) {
   const linhas = texto.split(/\r?\n/).filter((l) => l.trim() !== "");
   if (linhas.length < 2) throw new Error("A planilha precisa ter cabeçalho e pelo menos um aluno.");
   const sep = linhas[0].split(";").length > linhas[0].split(",").length ? ";" : ",";
   const cabecalho = separarLinha(linhas[0], sep).map(NORMALIZAR);
-  const idx = (nome) => cabecalho.indexOf(nome);
-  if (idx("matricula") < 0 || idx("nome") < 0) {
-    throw new Error("A planilha precisa das colunas 'matricula' e 'nome'.");
+  // Descobre em qual coluna está cada campo, aceitando os nomes alternativos
+  const posicao = (campo) => {
+    const i = cabecalho.findIndex((h) => ALIASES[campo].map(NORMALIZAR).includes(h));
+    return i;
+  };
+  const colMatricula = posicao("matricula");
+  const colNome = posicao("nome");
+  if (colMatricula < 0 || colNome < 0) {
+    throw new Error("A planilha precisa das colunas de matrícula (ID ou matricula) e de nome (Nome ou Nome Completo).");
   }
+  const colEmail = posicao("email");
+  const colCelular = posicao("celular");
   return linhas.slice(1).map((linha) => {
     const c = separarLinha(linha, sep);
-    const pegar = (nome) => (idx(nome) >= 0 ? c[idx(nome)] ?? "" : "");
-    return { matricula: pegar("matricula"), nome: pegar("nome"), email: pegar("email"), celular: pegar("celular") };
+    return {
+      matricula: c[colMatricula] ?? "",
+      nome: c[colNome] ?? "",
+      email: colEmail >= 0 ? c[colEmail] ?? "" : "",
+      celular: colCelular >= 0 ? c[colCelular] ?? "" : "",
+    };
   });
 }
 
