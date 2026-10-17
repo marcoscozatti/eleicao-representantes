@@ -27,8 +27,30 @@ async function carregarTurmas() {
 async function carregarEleicoes() {
   const lista = await api("eleicoes", { token }).catch(() => []);
   $("lista-eleicoes").innerHTML = lista.length
-    ? lista.map((e) => `<li>${e.dataEleicao} — ${e.status}</li>`).join("")
+    ? lista
+        .map((e) => `<li>${e.dataEleicao} — ${e.status} — ID: <code>${e.id}</code>
+           <button class="link" data-usar-id="${e.id}">usar esta eleição</button></li>`)
+        .join("")
     : "<li>Nenhuma eleição criada.</li>";
+}
+
+// Clicar em "usar esta eleição" preenche o campo de ID e carrega os alunos da turma dela
+$("lista-eleicoes").addEventListener("click", async (ev) => {
+  const id = ev.target.dataset.usarId;
+  if (!id) return;
+  $("eleicao-id").value = id;
+  msg(`Eleição ${id} selecionada.`);
+  await carregarCandidatos(id);
+});
+
+// Preenche a lista de candidatos com os alunos da turma da eleição escolhida
+async function carregarCandidatos(eleicaoId) {
+  const eleicoes = await api("eleicoes", { token });
+  const e = eleicoes.find((x) => x.id === eleicaoId);
+  const alunos = await api(`alunos${e ? `?turmaId=${encodeURIComponent(e.turmaId)}` : ""}`, { token });
+  $("sel-candidato").innerHTML = alunos.length
+    ? alunos.map((a) => `<option value="${a.matricula}">${a.nome} (${a.matricula})</option>`).join("")
+    : '<option value="">Nenhum aluno nesta turma</option>';
 }
 
 // ---------- Login ----------
@@ -139,7 +161,7 @@ $("form-candidato").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const f = new FormData(ev.target);
   const id = $("eleicao-id").value.trim();
-  if (!id) return msg("Informe o ID da eleição.", false);
+  if (!id) return msg("Escolha uma eleição na lista primeiro.", false);
   try {
     await api(`eleicoes/${id}/candidatos`, {
       metodo: "POST",
