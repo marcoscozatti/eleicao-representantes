@@ -8,14 +8,18 @@
   <script type="module" src="/js/urna.js"></script>
 </head>
 <body class="urna-corpo">
-  <main class="urna">
-    <header class="urna-cabecalho">
-      <span>SENAC · ELEIÇÃO DE REPRESENTANTES</span>
+  <div class="urna-caixa">
+    <header class="urna-topo">
+      <img class="urna-logo" src="/img/senac.png" alt="Senac">
+      <div class="urna-titulo">
+        <strong>ELEIÇÃO DE REPRESENTANTES</strong>
+        <span>Urna eletrônica</span>
+      </div>
       <button id="btn-sair" class="link" hidden>Sair</button>
     </header>
 
-    <!-- Login do aluno -->
-    <section id="tela-login" class="tela" hidden>
+    <!-- Identificação do aluno -->
+    <section id="tela-login" class="login-cartao" hidden>
       <h1>Identificação do eleitor</h1>
       <form id="form-login" class="formulario">
         <label>Matrícula <input id="matricula" required autocomplete="username" inputmode="numeric"></label>
@@ -25,41 +29,70 @@
       </form>
     </section>
 
-    <!-- Tela da urna -->
-    <section id="tela-urna" class="tela" hidden>
-      <div class="visor">
-        <p class="visor-titulo">SEU VOTO PARA</p>
-        <p id="visor-numero" class="visor-numero">__</p>
-        <div id="visor-candidato" class="visor-candidato" hidden>
-          <img id="visor-foto" alt="Foto do candidato" hidden>
-          <p id="visor-nome"></p>
+    <!-- Urna: visor e teclado -->
+    <section id="tela-urna" hidden>
+      <div class="urna-grade">
+        <div class="visor" aria-live="polite">
+          <div class="visor-cabecalho">
+            <span>VOTAÇÃO</span>
+            <span>REPRESENTANTE DA TURMA</span>
+          </div>
+          <div class="visor-corpo">
+            <div class="visor-esquerda">
+              <p class="visor-rotulo">Número</p>
+              <div id="visor-caixas" class="visor-caixas">
+                <span id="digito-1"></span><span id="digito-2"></span>
+              </div>
+              <div id="visor-candidato" class="visor-dados" hidden>
+                <p class="visor-rotulo">Nome</p>
+                <p id="visor-nome" class="visor-nome"></p>
+                <p class="visor-cargo">Cargo: Representante</p>
+              </div>
+              <p id="visor-branco" class="visor-branco" hidden>VOTO EM BRANCO</p>
+              <p id="visor-aviso" class="visor-aviso" role="status"></p>
+            </div>
+            <div id="visor-direita" class="visor-direita" hidden>
+              <img id="visor-foto" alt="Foto do candidato" hidden>
+              <div id="visor-sem-foto" class="visor-sem-foto" hidden>sem foto</div>
+            </div>
+          </div>
+          <div class="visor-rodape">
+            <span>VERDE: confirma</span>
+            <span>LARANJA: corrige</span>
+          </div>
         </div>
-        <p id="visor-branco" class="visor-branco" hidden>VOTO EM BRANCO</p>
+
+        <div class="teclado-painel">
+          <div class="teclado" role="group" aria-label="Teclado da urna">
+            <button data-tecla="1" aria-label="1">1</button>
+            <button data-tecla="2" aria-label="2">2</button>
+            <button data-tecla="3" aria-label="3">3</button>
+            <button data-tecla="4" aria-label="4">4</button>
+            <button data-tecla="5" aria-label="5">5</button>
+            <button data-tecla="6" aria-label="6">6</button>
+            <button data-tecla="7" aria-label="7">7</button>
+            <button data-tecla="8" aria-label="8">8</button>
+            <button data-tecla="9" aria-label="9">9</button>
+            <button data-tecla="BRANCO" class="tecla-branco">BRANCO</button>
+            <button data-tecla="0" aria-label="0">0</button>
+            <button data-tecla="CORRIGE" class="tecla-corrige">CORRIGE</button>
+          </div>
+          <button id="btn-confirma" class="tecla-confirma">CONFIRMA</button>
+        </div>
       </div>
 
       <details class="lista-referencia">
         <summary>Candidatos e números</summary>
         <ul id="lista-candidatos"></ul>
       </details>
-
-      <div class="teclado" role="group" aria-label="Teclado da urna">
-        <button data-tecla="1">1</button><button data-tecla="2">2</button><button data-tecla="3">3</button>
-        <button data-tecla="4">4</button><button data-tecla="5">5</button><button data-tecla="6">6</button>
-        <button data-tecla="7">7</button><button data-tecla="8">8</button><button data-tecla="9">9</button>
-        <button data-tecla="BRANCO" class="tecla-branco">BRANCO</button>
-        <button data-tecla="0">0</button>
-        <button data-tecla="CORRIGE" class="tecla-corrige">CORRIGE</button>
-      </div>
-      <button id="btn-confirma" class="tecla-confirma">CONFIRMA</button>
-      <p id="aviso" class="aviso" role="status"></p>
     </section>
 
     <!-- Fim -->
-    <section id="tela-fim" class="tela" hidden>
+    <section id="tela-fim" class="login-cartao" hidden>
       <h1>FIM</h1>
       <p id="fim-texto">Voto registrado. Você já pode deixar a sala.</p>
       <button id="btn-sair-fim" class="link" onclick="location.reload()">Voltar</button>
     </section>
-  </main>
+  </div>
 </body>
 </html>
