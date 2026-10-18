@@ -1,93 +1,196 @@
 import { api, $ } from "./common.js";
 
 const TOKEN_KEY = "eleicao.tokenProfessor";
+const ELEICAO_KEY = "eleicao.atual";
 let token = sessionStorage.getItem(TOKEN_KEY);
+let eleicaoAtualId = sessionStorage.getItem(ELEICAO_KEY);
+let turmas = [];
+let alunos = [];
+let eleicoes = [];
+let ultimasSenhas = [];
 
-function mostrarPainel(logado) {
-  $("tela-login-prof").hidden = logado;
-  $("painel").hidden = !logado;
-}
+const STATUS = {
+  rascunho: "Rascunho",
+  aberta: "Votação aberta",
+  aguardando_apuracao: "Votação encerrada",
+  apurada: "Apurada",
+};
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const dataBr = (iso) => { const [a, m, d] = String(iso).split("-"); return a && m && d ? `${d}/${m}/${a}` : iso; };
+const turmaSel = () => $("sel-turma-alunos").value;
+const eleicaoAtual = () => eleicoes.find((e) => e.id === eleicaoAtualId) ?? null;
+const textoStatus = (e) => STATUS[e.status] + (e.status === "aberta" && e.rodada > 1 ? " (segundo turno)" : "");
+const nomeTurma = (id) => turmas.find((t) => t.id === id)?.nome ?? "";
+const alunosDaTurma = (turmaId) =>
+  alunos.filter((a) => a.turmaId === turmaId).sort((a, b) => a.nome.localeCompare(b.nome));
 
 function msg(texto, ok = true) {
   const el = $("msg");
   el.textContent = texto;
-  el.className = ok ? "ok" : "erro";
+  el.className = `msg-passo ${ok ? "ok" : "erro"}`;
 }
 
-async function carregarTurmas() {
-  const turmas = await api("turmas", { token });
-  const selects = ["sel-turma-aluno", "sel-turma-eleicao", "sel-turma-import"];
-  for (const id of selects) {
-    const s = $(id);
-    s.innerHTML = turmas.map((t) => `<option value="${t.id}">${t.nome} - ${t.curso}</option>`).join("");
-  }
-  return turmas;
+function mostrarPainel(logado) {
+  $("tela-login-prof").hidden = logado;
+  $("painel").hidden = !logado;
+  $("btn-sair-prof").hidden = !logado;
 }
 
-async function carregarEleicoes() {
-  const lista = await api("eleicoes", { token }).catch(() => []);
-  $("lista-eleicoes").innerHTML = lista.length
-    ? lista
-        .map((e) => `<li>${e.dataEleicao} — ${e.status} — ID: <code>${e.id}</code>
-           <button class="link" data-usar-id="${e.id}">usar esta eleição</button></li>`)
-        .join("")
+// ---------- Navegação por passos ----------
+function irPasso(n) {
+  document.querySelectorAll("[data-passo]").forEach((s) => { s.hidden = Number(s.dataset.passo) !== n; });
+  document.querySelectorAll(".passos li").forEach((li, i) => li.classList.toggle("atual", i + 1 === n));
+  msg("");
+  window.scrollTo({ top: 0 });
+}
+
+// Um passo está feito quando o que ele pede já existe
+function passosFeitos() {
+  const e = eleicaoAtual();
+  return {
+    1: turmas.length > 0,
+    2: alunos.length > 0,
+    3: alunos.some((a) => a.fotoKey),
+    4: eleicoes.length > 0,
+    5: !!e && e.candidatos.length > 0,
+    6: !!e && e.status !== "rascunho",
+  };
+}
+
+function marcarPassos() {
+  const feitos = passosFeitos();
+  document.querySelectorAll(".passos li").forEach((li, i) => li.classList.toggle("feito", !!feitos[i + 1]));
+}
+
+// ---------- Desenho das telas ----------
+function preencherTurmas() {
+  const opcoes = turmas.length
+    ? turmas.map((t) => `<option value="${esc(t.id)}">${esc(t.nome)} — ${esc(t.curso)}</option>`).join("")
+    : '<option value="">Cadastre uma turma no passo 1</option>';
+  const atual = $("sel-turma-alunos").value;
+  $("sel-turma-alunos").innerHTML = opcoes;
+  if (turmas.some((t) => t.id === atual)) $("sel-turma-alunos").value = atual;
+  $("sel-turma-eleicao").innerHTML = opcoes;
+}
+
+function renderTurmas() {
+  $("lista-turmas").innerHTML = turmas.length
+    ? turmas.map((t) => `<li>${esc(t.nome)} — ${esc(t.curso)}</li>`).join("")
+    : "<li>Nenhuma turma cadastrada.</li>";
+}
+
+// Lista de alunos da turma escolhida, com a situação da foto
+function renderAlunos() {
+  const lista = alunosDaTurma(turmaSel());
+  const linhas = lista.map((a) => `<tr><td>${esc(a.matricula)}</td><td>${esc(a.nome)}</td>
+    <td>${a.fotoKey ? '<span class="badge badge-ok">com foto</span>' : '<span class="badge badge-alerta">sem foto</span>'}</td></tr>`).join("");
+  const tabela = lista.length
+    ? `<table class="tabela"><thead><tr><th>Matrícula</th><th>Nome</th><th>Foto</th></tr></thead><tbody>${linhas}</tbody></table>`
+    : '<p class="ajuda">Nenhum aluno nesta turma ainda.</p>';
+  $("tabela-alunos-2").innerHTML = tabela;
+  const comFoto = lista.filter((a) => a.fotoKey).length;
+  $("tabela-fotos").innerHTML = `<p class="ajuda">${comFoto} de ${lista.length} aluno(s) com foto.</p>${tabela}`;
+}
+
+function renderEleicoes() {
+  $("lista-eleicoes").innerHTML = eleicoes.length
+    ? eleicoes.map((e) => `<li>${esc(nomeTurma(e.turmaId))} · ${dataBr(e.dataEleicao)} · ${textoStatus(e)}
+        ${e.id === eleicaoAtualId
+          ? '<span class="badge badge-ok">selecionada</span>'
+          : `<button class="link" data-usar="${esc(e.id)}">usar esta</button>`}</li>`).join("")
     : "<li>Nenhuma eleição criada.</li>";
 }
 
-// Clicar em "usar esta eleição" preenche o campo de ID e carrega os alunos da turma dela
-$("lista-eleicoes").addEventListener("click", async (ev) => {
-  const id = ev.target.dataset.usarId;
-  if (!id) return;
-  $("eleicao-id").value = id;
-  msg(`Eleição ${id} selecionada.`);
-  await carregarCandidatos(id);
-});
-
-// Preenche a lista de candidatos com os alunos da turma da eleição escolhida
-async function carregarCandidatos(eleicaoId) {
-  const eleicoes = await api("eleicoes", { token });
-  const e = eleicoes.find((x) => x.id === eleicaoId);
-  const alunos = await api(`alunos${e ? `?turmaId=${encodeURIComponent(e.turmaId)}` : ""}`, { token });
-  $("sel-candidato").innerHTML = alunos.length
-    ? alunos.map((a) => `<option value="${a.matricula}">${a.nome} (${a.matricula})</option>`).join("")
-    : '<option value="">Nenhum aluno nesta turma</option>';
+// Faixa no topo de todos os passos com a eleição em uso
+function renderBanner() {
+  const e = eleicaoAtual();
+  $("banner-eleicao").innerHTML = e
+    ? `<span><strong>Eleição atual:</strong> ${esc(nomeTurma(e.turmaId))} · <span class="badge">${esc(textoStatus(e))}</span></span>
+       <button class="btn-secundario" data-ir="6">Ir para ações</button>`
+    : `<span>Nenhuma eleição escolhida ainda.</span>
+       <button class="btn-secundario" data-ir="4">Criar ou escolher</button>`;
 }
 
-// ---------- Login ----------
-$("form-login-prof").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  try {
-    const r = await api("auth/professor", { metodo: "POST", corpo: { senha: $("senha-prof").value } });
-    token = r.token;
-    sessionStorage.setItem(TOKEN_KEY, token);
-    await iniciar();
-  } catch (err) {
-    $("erro-login-prof").textContent = err.message;
+function renderCandidatos() {
+  const e = eleicaoAtual();
+  const pode = !!e && e.status === "rascunho";
+  $("aviso-candidatos").textContent = !e
+    ? "Escolha ou crie uma eleição no passo 4."
+    : pode
+      ? "Escolha o aluno e o número que ele terá na urna. Candidatos só podem ser definidos antes de abrir a votação."
+      : "A votação já foi aberta: não é possível mudar os candidatos desta eleição.";
+  for (const el of $("form-candidato").elements) el.disabled = !pode;
+  const opcoes = e ? alunosDaTurma(e.turmaId).map((a) => `<option value="${esc(a.matricula)}">${esc(a.nome)} (${esc(a.matricula)})</option>`).join("") : "";
+  $("sel-candidato").innerHTML = opcoes || '<option value="">Nenhum aluno nesta turma</option>';
+  const nomes = Object.fromEntries(alunos.map((a) => [a.matricula, a.nome]));
+  $("lista-candidatos-eleicao").innerHTML = e && e.candidatos.length
+    ? [...e.candidatos].sort((a, b) => a.numero - b.numero)
+        .map((c) => `<li>nº ${String(c.numero).padStart(2, "0")} — ${esc(nomes[c.matricula] ?? c.matricula)}</li>`).join("")
+    : "<li>Nenhum candidato ainda.</li>";
+}
+
+// Botões da etapa 6 só ficam ativos quando fazem sentido para a situação atual
+function renderAcoes() {
+  const e = eleicaoAtual();
+  const st = e?.status;
+  $("status-eleicao").textContent = e ? textoStatus(e) : "Nenhuma eleição escolhida";
+  const dicas = {
+    rascunho: "Confira os candidatos e clique em 1. Abrir votação. Depois disso, os alunos já podem votar.",
+    aberta: "A votação está aberta. Acompanhe o progresso e clique em 2. Encerrar votação quando terminar.",
+    aguardando_apuracao: "Votação encerrada. Clique em 3. Apurar para contar os votos.",
+    apurada: "Apuração concluída. Baixe a ata em PDF antes de apagar os dados.",
+  };
+  $("dica-acao").textContent = e ? dicas[st] : "Escolha ou crie uma eleição no passo 4.";
+  const habilitar = {
+    abrir: st === "rascunho",
+    encerrar: st === "aberta",
+    apurar: st === "aguardando_apuracao",
+    ata: st === "apurada",
+    progresso: !!e,
+  };
+  document.querySelectorAll("[data-acao]").forEach((b) => { b.disabled = !habilitar[b.dataset.acao]; });
+}
+
+async function carregarTudo() {
+  const [t, el, al] = await Promise.all([
+    api("turmas", { token }),
+    api("eleicoes", { token }).catch(() => []),
+    api("alunos", { token }).catch(() => []),
+  ]);
+  turmas = t;
+  eleicoes = el;
+  alunos = al;
+  if (eleicaoAtualId && !eleicoes.some((x) => x.id === eleicaoAtualId)) {
+    eleicaoAtualId = null;
+    sessionStorage.removeItem(ELEICAO_KEY);
   }
-});
-
-$("btn-sair-prof").addEventListener("click", async () => {
-  await api("auth/logout", { metodo: "POST", token }).catch(() => {});
-  sessionStorage.removeItem(TOKEN_KEY);
-  token = null;
-  mostrarPainel(false);
-});
-
-// ---------- Turmas ----------
-$("form-turma").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const f = new FormData(ev.target);
-  try {
-    await api("turmas", { metodo: "POST", token, corpo: Object.fromEntries(f) });
-    ev.target.reset();
-    msg("Turma cadastrada.");
-    await carregarTurmas();
-  } catch (err) {
-    msg(err.message, false);
+  // Sem eleição escolhida, usa a mais recente criada
+  if (!eleicaoAtualId && eleicoes.length) {
+    eleicaoAtualId = eleicoes[eleicoes.length - 1].id;
+    sessionStorage.setItem(ELEICAO_KEY, eleicaoAtualId);
   }
-});
+  preencherTurmas();
+  renderTurmas();
+  renderAlunos();
+  renderEleicoes();
+  renderCandidatos();
+  renderAcoes();
+  renderBanner();
+  marcarPassos();
+}
 
-// ---------- Alunos (com foto) ----------
+function usarEleicao(id) {
+  eleicaoAtualId = id;
+  sessionStorage.setItem(ELEICAO_KEY, id);
+  renderEleicoes();
+  renderBanner();
+  renderCandidatos();
+  renderAcoes();
+  marcarPassos();
+}
+
+// ---------- Utilidades de arquivo ----------
 function lerFoto(arquivo) {
   return new Promise((resolve, reject) => {
     if (!arquivo) return resolve(null);
@@ -101,122 +204,7 @@ function lerFoto(arquivo) {
   });
 }
 
-$("form-aluno").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const f = new FormData(ev.target);
-  try {
-    const foto = await lerFoto(f.get("foto")?.size ? f.get("foto") : null);
-    const dados = {
-      turmaId: f.get("turmaId"),
-      matricula: f.get("matricula"),
-      nome: f.get("nome"),
-      senha: f.get("senha"),
-      email: f.get("email") || null,
-      celular: f.get("celular") || null,
-      foto,
-    };
-    const r = await api("alunos", { metodo: "POST", token, corpo: dados });
-    ev.target.reset();
-    msg(`Aluno ${r.nome} cadastrado.`);
-  } catch (err) {
-    msg(err.message, false);
-  }
-});
-
-// ---------- Eleição ----------
-$("form-eleicao").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const f = new FormData(ev.target);
-  try {
-    await api("eleicoes", { metodo: "POST", token, corpo: Object.fromEntries(f) });
-    msg("Eleição criada (rascunho).");
-    await carregarEleicoes();
-  } catch (err) {
-    msg(err.message, false);
-  }
-});
-
-// Mostra o resultado da apuração (ou o aviso de segundo turno)
-function mostrarResultado(r) {
-  const pre = $("resultado-apuracao");
-  if (!r.resultado) {
-    pre.hidden = true;
-    return msg(r.mensagem || `Situação: ${r.status}.`);
-  }
-  const x = r.resultado;
-  const linhas = [
-    x.eleito
-      ? `Representante: ${x.eleito.nome} (nº ${x.eleito.numero})${x.desempatadoPorSorteio ? " — escolhido por sorteio" : ""}`
-      : "Sem representante eleito (nenhum voto válido).",
-    ...x.suplentes.map((s) => `Suplente ${s.ordem}: ${s.nome} (nº ${s.numero}, ${s.votos} votos)`),
-    x.desempateSuplentesPorSorteio ? "Empate entre suplentes desempatado por sorteio." : "",
-    `Brancos: ${x.brancos}. Rodadas: ${x.rodadas}.`,
-  ].filter(Boolean);
-  pre.textContent = linhas.join("\n");
-  pre.hidden = false;
-  msg("Apuração concluída.");
-}
-
-// Ações sobre a eleição: informe o ID e clique no botão desejado
-document.querySelectorAll("[data-acao]").forEach((b) =>
-  b.addEventListener("click", async () => {
-    const id = $("eleicao-id").value.trim();
-    if (!id) return msg("Informe o ID da eleição.", false);
-    const acao = b.dataset.acao;
-    try {
-      if (acao === "progresso") {
-        const p = await api(`eleicoes/${id}/progresso`, { token });
-        msg(`Votaram ${p.votaram} de ${p.total} eleitores${p.rodada > 1 ? ` (segundo turno)` : ""}.`);
-      } else if (acao === "apurar") {
-        const r = await api(`eleicoes/${id}/apurar`, { metodo: "POST", token });
-        mostrarResultado(r);
-        await carregarEleicoes();
-      } else if (acao === "ata") {
-        // A ata exige o token no cabeçalho, por isso o download é feito com fetch
-        const res = await fetch(`/api/eleicoes/${id}/ata`, { headers: { Authorization: `Bearer ${token}` } });
-        if (!res.ok) {
-          const dados = await res.json().catch(() => ({}));
-          throw new Error(dados.erro || "Não foi possível gerar a ata.");
-        }
-        const url = URL.createObjectURL(await res.blob());
-        const link = document.createElement("a");
-        link.href = url;
-        link.download = "ata-eleicao.pdf";
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
-        msg("Ata gerada.");
-      } else {
-        const r = await api(`eleicoes/${id}/${acao}`, { metodo: "POST", token });
-        msg(`Situação: ${r.status}${r.eleitores !== undefined ? ` (${r.eleitores} eleitores)` : ""}.`);
-        await carregarEleicoes();
-      }
-    } catch (err) {
-      msg(err.message, false);
-    }
-  })
-);
-
-$("form-candidato").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const f = new FormData(ev.target);
-  const id = $("eleicao-id").value.trim();
-  if (!id) return msg("Escolha uma eleição na lista primeiro.", false);
-  try {
-    await api(`eleicoes/${id}/candidatos`, {
-      metodo: "POST",
-      token,
-      corpo: { matricula: f.get("matricula"), numero: Number(f.get("numero")) },
-    });
-    ev.target.reset();
-    msg("Candidato definido.");
-  } catch (err) {
-    msg(err.message, false);
-  }
-});
-
-
-// ---------- Importação em massa ----------
-const NORMALIZAR = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase();
+const NORMALIZAR = (t) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase();
 
 // Lê o arquivo como UTF-8; se não for UTF-8 (comum no Excel do Windows), usa Windows-1252.
 function lerTexto(arquivo) {
@@ -261,11 +249,7 @@ function lerAlunosDoCsv(texto) {
   if (linhas.length < 2) throw new Error("A planilha precisa ter cabeçalho e pelo menos um aluno.");
   const sep = linhas[0].split(";").length > linhas[0].split(",").length ? ";" : ",";
   const cabecalho = separarLinha(linhas[0], sep).map(NORMALIZAR);
-  // Descobre em qual coluna está cada campo, aceitando os nomes alternativos
-  const posicao = (campo) => {
-    const i = cabecalho.findIndex((h) => ALIASES[campo].map(NORMALIZAR).includes(h));
-    return i;
-  };
+  const posicao = (campo) => cabecalho.findIndex((h) => ALIASES[campo].map(NORMALIZAR).includes(h));
   const colMatricula = posicao("matricula");
   const colNome = posicao("nome");
   if (colMatricula < 0 || colNome < 0) {
@@ -285,51 +269,105 @@ function lerAlunosDoCsv(texto) {
 }
 
 function baixarCsv(nomeArquivo, linhas) {
-  // BOM (\ufeff) faz o Excel abrir acentos corretamente
-  const conteudo = "\ufeff" + linhas.join("\r\n");
+  // BOM (﻿) faz o Excel abrir acentos corretamente
+  const conteudo = "﻿" + linhas.join("\r\n");
   const url = URL.createObjectURL(new Blob([conteudo], { type: "text/csv;charset=utf-8" }));
   const a = document.createElement("a");
   a.href = url; a.download = nomeArquivo; a.click();
   URL.revokeObjectURL(url);
 }
 
-let ultimasSenhas = [];
-
-$("form-importar").addEventListener("submit", async (ev) => {
+// ---------- Entrada e saída ----------
+$("form-login-prof").addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  const f = new FormData(ev.target);
-  const arquivo = f.get("arquivo");
   try {
-    const alunos = lerAlunosDoCsv(await lerTexto(arquivo));
-    const r = await api("alunos/importar", {
-      metodo: "POST",
-      token,
-      corpo: { turmaId: f.get("turmaId"), alunos },
-    });
-    ultimasSenhas = r.resultados.filter((x) => x.senha);
-    $("resumo-import").textContent = `${r.criados} de ${alunos.length} aluno(s) cadastrado(s).`;
-    $("erros-import").innerHTML = r.resultados
-      .filter((x) => x.erro)
-      .map((x) => `<li>${x.matricula || "(sem matrícula)"} ${x.nome}: ${x.erro}</li>`)
-      .join("");
-    $("resultado-import").hidden = false;
-    msg("Importação concluída.");
+    const r = await api("auth/professor", { metodo: "POST", corpo: { senha: $("senha-prof").value } });
+    token = r.token;
+    sessionStorage.setItem(TOKEN_KEY, token);
+    await iniciar();
+  } catch (err) {
+    $("erro-login-prof").textContent = err.message;
+  }
+});
+
+$("btn-sair-prof").addEventListener("click", async () => {
+  await api("auth/logout", { metodo: "POST", token }).catch(() => {});
+  sessionStorage.removeItem(TOKEN_KEY);
+  token = null;
+  mostrarPainel(false);
+});
+
+// ---------- Passo 1: turma ----------
+$("form-turma").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("turmas", { metodo: "POST", token, corpo: Object.fromEntries(new FormData(ev.target)) });
+    ev.target.reset();
+    await carregarTudo();
+    irPasso(2);
+    msg("Turma cadastrada. Agora cadastre os alunos.");
   } catch (err) {
     msg(err.message, false);
   }
 });
 
-$("btn-baixar-senhas").addEventListener("click", () => {
-  const linhas = ["matricula;nome;senha", ...ultimasSenhas.map((x) => `${x.matricula};"${x.nome}";${x.senha}`)];
-  baixarCsv("senhas-alunos.csv", linhas);
+// ---------- Passo 2: alunos e senhas ----------
+$("sel-turma-alunos").addEventListener("change", renderAlunos);
+
+$("form-aluno").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!turmaSel()) return msg("Cadastre e escolha uma turma primeiro.", false);
+  const f = new FormData(ev.target);
+  try {
+    const foto = await lerFoto(f.get("foto")?.size ? f.get("foto") : null);
+    const r = await api("alunos", {
+      metodo: "POST",
+      token,
+      corpo: {
+        turmaId: turmaSel(),
+        matricula: f.get("matricula"),
+        nome: f.get("nome"),
+        senha: f.get("senha"),
+        email: f.get("email") || null,
+        celular: f.get("celular") || null,
+        foto,
+      },
+    });
+    ev.target.reset();
+    await carregarTudo();
+    msg(`Aluno ${r.nome} cadastrado.`);
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
+$("form-importar").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!turmaSel()) return msg("Cadastre e escolha uma turma primeiro.", false);
+  const arquivo = new FormData(ev.target).get("arquivo");
+  try {
+    const lista = lerAlunosDoCsv(await lerTexto(arquivo));
+    const r = await api("alunos/importar", { metodo: "POST", token, corpo: { turmaId: turmaSel(), alunos: lista } });
+    ultimasSenhas = r.resultados.filter((x) => x.senha);
+    $("resumo-import").textContent = `${r.criados} de ${lista.length} aluno(s) cadastrado(s).`;
+    $("erros-import").innerHTML = r.resultados
+      .filter((x) => x.erro)
+      .map((x) => `<li>${esc(x.matricula || "(sem matrícula)")} ${esc(x.nome)}: ${esc(x.erro)}</li>`)
+      .join("");
+    $("resultado-import").hidden = false;
+    ev.target.reset();
+    await carregarTudo();
+    msg("Importação concluída. Baixe a lista de senhas agora.");
+  } catch (err) {
+    msg(err.message, false);
+  }
 });
 
 $("btn-novas-senhas").addEventListener("click", async () => {
-  const turmaId = $("sel-turma-import").value;
-  if (!turmaId) return msg("Escolha a turma.", false);
+  if (!turmaSel()) return msg("Escolha a turma.", false);
   if (!confirm("Isso troca a senha de TODOS os alunos desta turma. Continuar?")) return;
   try {
-    const r = await api(`turmas/${encodeURIComponent(turmaId)}/senhas`, { metodo: "POST", token });
+    const r = await api(`turmas/${encodeURIComponent(turmaSel())}/senhas`, { metodo: "POST", token });
     ultimasSenhas = r.resultados;
     $("resumo-import").textContent = `Novas senhas geradas para ${r.total} aluno(s).`;
     $("erros-import").innerHTML = "";
@@ -340,6 +378,12 @@ $("btn-novas-senhas").addEventListener("click", async () => {
   }
 });
 
+$("btn-baixar-senhas").addEventListener("click", () => {
+  const linhas = ["matricula;nome;senha", ...ultimasSenhas.map((x) => `${x.matricula};"${x.nome}";${x.senha}`)];
+  baixarCsv("senhas-alunos.csv", linhas);
+});
+
+// ---------- Passo 3: fotos ----------
 $("form-fotos").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const arquivos = Array.from(ev.target.fotos.files);
@@ -348,14 +392,9 @@ $("form-fotos").addEventListener("submit", async (ev) => {
   for (const arq of arquivos) {
     const matricula = arq.name.replace(/\.[^.]+$/, "").trim();
     try {
-      const base64 = await new Promise((resolve, reject) => {
-        const leitor = new FileReader();
-        leitor.onload = () => resolve(String(leitor.result).split(",")[1]);
-        leitor.onerror = reject;
-        leitor.readAsDataURL(arq);
-      });
+      const foto = await lerFoto(arq);
       await api(`alunos/${encodeURIComponent(matricula)}/foto`, {
-        metodo: "POST", token, corpo: { contentType: arq.type, base64 },
+        metodo: "POST", token, corpo: { contentType: arq.type, base64: foto.base64 },
       });
       ok++;
     } catch (err) {
@@ -364,15 +403,114 @@ $("form-fotos").addEventListener("submit", async (ev) => {
   }
   $("resumo-fotos").textContent = `${ok} foto(s) enviada(s).` + (falhas.length ? ` Falhas: ${falhas.join("; ")}` : "");
   ev.target.reset();
+  await carregarTudo();
 });
 
+// ---------- Passo 4: eleição ----------
+$("form-eleicao").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    const r = await api("eleicoes", { metodo: "POST", token, corpo: Object.fromEntries(new FormData(ev.target)) });
+    usarEleicao(r.id);
+    await carregarTudo();
+    irPasso(5);
+    msg("Eleição criada e selecionada. Agora defina os candidatos.");
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
+// ---------- Passo 5: candidatos ----------
+$("form-candidato").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!eleicaoAtualId) return msg("Escolha uma eleição no passo 4.", false);
+  const f = new FormData(ev.target);
+  try {
+    await api(`eleicoes/${eleicaoAtualId}/candidatos`, {
+      metodo: "POST",
+      token,
+      corpo: { matricula: f.get("matricula"), numero: Number(f.get("numero")) },
+    });
+    ev.target.reset();
+    await carregarTudo();
+    msg("Candidato definido.");
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
+// ---------- Passo 6: ações da eleição ----------
+function mostrarResultado(r) {
+  const pre = $("resultado-apuracao");
+  if (!r.resultado) {
+    pre.hidden = true;
+    return msg(r.mensagem || `Situação: ${r.status}.`);
+  }
+  const x = r.resultado;
+  const linhas = [
+    x.eleito
+      ? `Representante: ${x.eleito.nome} (nº ${x.eleito.numero})${x.desempatadoPorSorteio ? " — escolhido por sorteio" : ""}`
+      : "Sem representante eleito (nenhum voto válido).",
+    ...x.suplentes.map((s) => `Suplente ${s.ordem}: ${s.nome} (nº ${s.numero}, ${s.votos} votos)`),
+    x.desempateSuplentesPorSorteio ? "Empate entre suplentes desempatado por sorteio." : "",
+    `Brancos: ${x.brancos}. Rodadas: ${x.rodadas}.`,
+  ].filter(Boolean);
+  pre.textContent = linhas.join("\n");
+  pre.hidden = false;
+  msg("Apuração concluída.");
+}
+
+async function baixarAta(id) {
+  // A ata exige o token no cabeçalho, por isso o download é feito com fetch
+  const res = await fetch(`/api/eleicoes/${id}/ata`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) {
+    const dados = await res.json().catch(() => ({}));
+    throw new Error(dados.erro || "Não foi possível gerar a ata.");
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "ata-eleicao.pdf";
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+  msg("Ata gerada.");
+}
+
+document.querySelectorAll("[data-acao]").forEach((b) =>
+  b.addEventListener("click", async () => {
+    const id = eleicaoAtualId;
+    if (!id) return msg("Escolha uma eleição no passo 4.", false);
+    const acao = b.dataset.acao;
+    try {
+      if (acao === "progresso") {
+        const p = await api(`eleicoes/${id}/progresso`, { token });
+        msg(`Votaram ${p.votaram} de ${p.total} eleitores${p.rodada > 1 ? " (segundo turno)" : ""}.`);
+      } else if (acao === "apurar") {
+        mostrarResultado(await api(`eleicoes/${id}/apurar`, { metodo: "POST", token }));
+        await carregarTudo();
+      } else if (acao === "ata") {
+        await baixarAta(id);
+      } else {
+        await api(`eleicoes/${id}/${acao}`, { metodo: "POST", token });
+        await carregarTudo();
+        msg(acao === "abrir" ? "Votação aberta. Os alunos já podem votar." : "Votação encerrada. Agora clique em Apurar.");
+      }
+    } catch (err) {
+      msg(err.message, false);
+    }
+  })
+);
+
+// ---------- Passo 7: apagar tudo ----------
 $("btn-apagar-tudo").addEventListener("click", async () => {
-  const digitado = prompt('Para apagar TODOS os dados, digite exatamente: APAGAR TUDO');
+  const digitado = prompt("Para apagar TODOS os dados, digite exatamente: APAGAR TUDO");
   if (digitado !== "APAGAR TUDO") return msg("Operação cancelada.", false);
   try {
     const r = await api("admin/apagar-tudo", { metodo: "POST", token, corpo: { confirmacao: digitado } });
     sessionStorage.removeItem(TOKEN_KEY);
+    sessionStorage.removeItem(ELEICAO_KEY);
     token = null;
+    eleicaoAtualId = null;
     alert(`${r.apagados} registro(s) apagado(s). Entre novamente.`);
     mostrarPainel(false);
   } catch (err) {
@@ -380,10 +518,30 @@ $("btn-apagar-tudo").addEventListener("click", async () => {
   }
 });
 
+// ---------- Navegação (botões dos passos, banner e listas) ----------
+document.addEventListener("click", (ev) => {
+  const t = ev.target.closest("[data-ir],[data-proximo],[data-anterior],[data-usar]");
+  if (!t) return;
+  if (t.dataset.usar) {
+    usarEleicao(t.dataset.usar);
+    return msg("Eleição selecionada.");
+  }
+  const n = Number(t.dataset.ir ?? t.dataset.proximo ?? t.dataset.anterior);
+  irPasso(n);
+});
+
+// Abre no primeiro passo que ainda falta fazer
 async function iniciar() {
   mostrarPainel(true);
-  await carregarTurmas().catch((e) => msg(e.message, false));
-  await carregarEleicoes();
+  try {
+    await carregarTudo();
+    const feitos = passosFeitos();
+    const proximo = [1, 2, 3, 4, 5, 6].find((k) => !feitos[k]) ?? 6;
+    irPasso(proximo);
+  } catch (err) {
+    msg(err.message, false);
+    irPasso(1);
+  }
 }
 
 if (token) iniciar();
