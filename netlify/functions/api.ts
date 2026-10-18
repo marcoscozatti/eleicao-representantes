@@ -4,6 +4,7 @@ import type { Config, Context } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
 import bcrypt from "bcryptjs";
 import { randomInt, randomUUID } from "node:crypto";
+import { gerarAta, type DadosAta } from "./ata-pdf";
 
 // ---------- Configuração ----------
 const SESSAO_HORAS = 12;
@@ -274,10 +275,33 @@ type Eleicao = {
   status: "rascunho" | "aberta" | "aguardando_apuracao" | "segundo_turno" | "apurada" | "apagada";
   rodada: number;
   candidatos: { matricula: string; numero: number }[];
+  disputa?: number[];   // números em disputa no segundo turno
+  historico?: { rodada: number; contagem: Record<number, number>; brancos: number; votos: number }[];
+  resultado?: ResultadoApuracao;
+};
+
+type ResultadoApuracao = {
+  eleito: { numero: number; nome: string } | null;
+  desempatadoPorSorteio: boolean;
+  suplentes: { ordem: number; numero: number; nome: string; votos: number }[];
+  desempateSuplentesPorSorteio: boolean;
+  brancos: number;
+  rodadas: number;
+  contagemFinal: Record<number, number>;
 };
 
 async function carregarEleicao(id: string): Promise<Eleicao | null> {
   return (await store().get(`eleicao/${id}`, { type: "json" })) as Eleicao | null;
+}
+
+// Marca de quem já votou. Na 1ª rodada a chave é a de sempre; no segundo turno leva o número da rodada.
+function marcaDeVoto(e: Eleicao, matricula: string) {
+  return e.rodada === 1 ? `votou/${e.id}/${matricula}` : `votou/${e.id}/r${e.rodada}/${matricula}`;
+}
+
+// Candidatos que podem receber voto na rodada atual.
+function candidatosDaRodada(e: Eleicao) {
+  return e.candidatos.filter((c) => !e.disputa || e.disputa.includes(c.numero));
 }
 
 async function criarEleicao(req: Request, s: Sessao | null) {
@@ -350,9 +374,12 @@ async function definirCandidato(id: string, req: Request, s: Sessao | null) {
 
 async function progresso(id: string, s: Sessao | null) {
   if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const e = await carregarEleicao(id);
+  if (!e) return erro("Eleição não encontrada", 404);
   const eleitores = ((await store().get(`eleitores/${id}`, { type: "json" })) as string[]) ?? [];
-  const votaram = (await chaves(`votou/${id}/`)).length;
-  return json({ total: eleitores.length, votaram });
+  let votaram = 0;
+  for (const m of eleitores) if (await store().get(marcaDeVoto(e, m))) votaram++;
+  return json({ total: eleitores.length, votaram, rodada: e.rodada });
 }
 
 // ---------- Urna (aluno) ----------
@@ -369,9 +396,9 @@ async function eleicaoAtiva(s: Sessao | null) {
   const eleitores = ((await store().get(`eleitores/${e.id}`, { type: "json" })) as string[]) ?? [];
   if (!eleitores.includes(s.matricula)) return erro("Você não está na lista de eleitores", 403);
 
-  const jaVotou = !!(await store().get(`votou/${e.id}/${s.matricula}`));
+  const jaVotou = !!(await store().get(marcaDeVoto(e, s.matricula)));
   const candidatos = await Promise.all(
-    e.candidatos.map(async (c) => {
+    candidatosDaRodada(e).map(async (c) => {
       const cand = (await store().get(`aluno/${c.matricula}`, { type: "json" })) as any;
       return { numero: c.numero, nome: cand.nome, fotoUrl: cand.fotoKey ? `/api/fotos/${c.matricula}` : null };
     })
@@ -393,11 +420,11 @@ async function votar(req: Request, s: Sessao | null) {
 
   // Valida o voto antes de qualquer gravação.
   const branco = numero === null || numero === undefined;
-  if (!branco && !e.candidatos.some((c) => c.numero === numero)) {
+  if (!branco && !candidatosDaRodada(e).some((c) => c.numero === numero)) {
     return erro("Número de candidato inválido", 400);
   }
 
-  const marca = `votou/${eleicaoId}/${s.matricula}`;
+  const marca = marcaDeVoto(e, s.matricula);
   if (await store().get(marca)) return erro("Você já votou nesta eleição", 409);
 
   // Blobs não tem escrita condicional nesta versão: gravamos uma marca com um
@@ -415,6 +442,94 @@ async function votar(req: Request, s: Sessao | null) {
   return json({ ok: true, mensagem: "Voto registrado" }, 201);
 }
 
+// ---------- Apuração ----------
+// Regras:
+// - Vence quem tiver mais votos. Brancos não contam para ninguém.
+// - Empate na 1ª rodada: abre o segundo turno só entre os empatados.
+// - Empate no segundo turno: sorteio entre os empatados.
+// - Suplentes: do 1º ao 5º, pela ordem de votos entre os demais candidatos.
+//   Não há segundo turno para suplentes; empate entre eles é desempatado por sorteio.
+const NUMERO_SUPLENTES = 5;
+
+async function apurarEleicao(id: string, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const e = await carregarEleicao(id);
+  if (!e) return erro("Eleição não encontrada", 404);
+  if (e.status === "apurada") return erro("Esta eleição já foi apurada", 409);
+  if (e.status !== "aguardando_apuracao") return erro("Encerre a votação antes de apurar", 409);
+
+  // Contagem da rodada atual
+  const candidatos = candidatosDaRodada(e);
+  const contagem: Record<number, number> = {};
+  for (const c of candidatos) contagem[c.numero] = 0;
+  const votos = await Promise.all(
+    (await chaves(`votos/${id}/${e.rodada}/`)).map((k) => store().get(k, { type: "json" }) as Promise<{ numero: number | null }>)
+  );
+  let brancos = 0;
+  for (const v of votos) {
+    if (v.numero === null) brancos++;
+    else if (contagem[v.numero] !== undefined) contagem[v.numero]++;
+  }
+  const totalValidos = Object.values(contagem).reduce((a, b) => a + b, 0);
+  const maior = Math.max(0, ...Object.values(contagem));
+  const empatados = candidatos.filter((c) => contagem[c.numero] === maior).map((c) => c.numero);
+
+  // Empate na 1ª rodada: abre o segundo turno entre os empatados
+  if (totalValidos > 0 && empatados.length > 1 && e.rodada === 1) {
+    e.historico = [...(e.historico ?? []), { rodada: 1, contagem, brancos, votos: votos.length }];
+    e.rodada = 2;
+    e.disputa = empatados;
+    e.status = "aberta";
+    await store().setJSON(`eleicao/${id}`, e);
+    return json({
+      id, status: e.status, rodada: 2, disputa: empatados,
+      mensagem: "Empate: segundo turno aberto só entre os empatados. Use Encerrar votação e depois Apurar.",
+    });
+  }
+
+  // Resultado final
+  const historico = [...(e.historico ?? []), { rodada: e.rodada, contagem, brancos, votos: votos.length }];
+  // Se ninguém votou no segundo turno, o desempate vai para sorteio entre os que empataram
+  const finalistas = totalValidos === 0 && e.rodada > 1 ? (e.disputa ?? []) : empatados;
+  const sorteado = finalistas.length > 1;
+  const eleito = finalistas.length === 0 || (totalValidos === 0 && e.rodada === 1)
+    ? null
+    : finalistas[randomInt(finalistas.length)];
+
+  // Pontuação para ordenar suplentes: no segundo turno, quem disputou usa a votação do segundo turno;
+  // os demais usam a votação da 1ª rodada.
+  const primeiraRodada = e.rodada > 1 ? (e.historico?.[0]?.contagem ?? contagem) : contagem;
+  const pontos = (n: number) => (e.rodada > 1 && e.disputa?.includes(n) ? contagem[n] ?? 0 : primeiraRodada[n] ?? 0);
+  const sorteioDeSuplentes = new Map<number, number>();
+  const pool = candidatos.map((c) => c.numero).filter((n) => n !== eleito);
+  for (const n of pool) sorteioDeSuplentes.set(n, randomInt(1_000_000));
+  pool.sort((a, b) => pontos(b) - pontos(a) || sorteioDeSuplentes.get(a)! - sorteioDeSuplentes.get(b)!);
+  const suplentes = pool.slice(0, NUMERO_SUPLENTES);
+  const desempatouSuplente = pool.some((a) => pool.some((b) => a !== b && pontos(a) === pontos(b)));
+
+  const nomeDe = async (numero: number) => {
+    const c = e.candidatos.find((x) => x.numero === numero)!;
+    const a = (await store().get(`aluno/${c.matricula}`, { type: "json" })) as { nome?: string } | null;
+    return a?.nome ?? c.matricula;
+  };
+
+  e.historico = historico;
+  e.resultado = {
+    eleito: eleito === null ? null : { numero: eleito, nome: await nomeDe(eleito) },
+    desempatadoPorSorteio: sorteado,
+    suplentes: await Promise.all(suplentes.map(async (n, i) => ({
+      ordem: i + 1, numero: n, nome: await nomeDe(n), votos: pontos(n),
+    }))),
+    desempateSuplentesPorSorteio: desempatouSuplente,
+    brancos,
+    rodadas: historico.length,
+    contagemFinal: contagem,
+  };
+  e.status = "apurada";
+  await store().setJSON(`eleicao/${id}`, e);
+  return json({ id, status: e.status, resultado: e.resultado });
+}
+
 // Apaga TODOS os dados (alunos, fotos, turmas, eleições, votos e sessões).
 // Exige confirmação digitada, para evitar apagamento por engano.
 async function apagarTudo(req: Request, s: Sessao | null) {
@@ -426,6 +541,48 @@ async function apagarTudo(req: Request, s: Sessao | null) {
   const chavesTodas = todas.blobs.map((b) => b.key);
   await Promise.all(chavesTodas.map((k) => store().delete(k)));
   return json({ apagados: chavesTodas.length });
+}
+
+// Ata em PDF. Só existe depois da apuração; os dados vêm do resultado guardado na eleição.
+async function ataEleicao(id: string, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const e = await carregarEleicao(id);
+  if (!e) return erro("Eleição não encontrada", 404);
+  if (e.status !== "apurada" || !e.resultado || !e.historico) {
+    return erro("A ata só pode ser gerada depois da apuração", 409);
+  }
+
+  const turma = (await store().get(`turma/${e.turmaId}`, { type: "json" })) as { nome?: string; curso?: string } | null;
+  const eleitores = ((await store().get(`eleitores/${id}`, { type: "json" })) as string[]) ?? [];
+  const candidatos = await Promise.all(
+    e.candidatos.map(async (c) => {
+      const a = (await store().get(`aluno/${c.matricula}`, { type: "json" })) as { nome?: string } | null;
+      return { numero: c.numero, nome: a?.nome ?? c.matricula };
+    })
+  );
+
+  const dados: DadosAta = {
+    turma: turma ? [turma.nome, turma.curso].filter(Boolean).join(" — ") : "",
+    dataEleicao: e.dataEleicao,
+    mandatoInicio: e.mandatoInicio,
+    mandatoFim: e.mandatoFim,
+    eleitores: eleitores.length,
+    rodadas: e.historico.map((h) => ({ rodada: h.rodada, votos: h.votos, brancos: h.brancos, contagem: h.contagem })),
+    candidatos,
+    eleito: e.resultado.eleito,
+    desempatadoPorSorteio: e.resultado.desempatadoPorSorteio,
+    suplentes: e.resultado.suplentes,
+    desempateSuplentesPorSorteio: e.resultado.desempateSuplentesPorSorteio,
+    geradaEm: new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+  };
+  const pdf = await gerarAta(dados);
+  return new Response(pdf, {
+    headers: {
+      "content-type": "application/pdf",
+      "content-disposition": `attachment; filename="ata-eleicao-${id}.pdf"`,
+      "cache-control": "no-store",
+    },
+  });
 }
 
 // ---------- Roteamento ----------
@@ -466,13 +623,15 @@ export default async (req: Request, _context: Context) => {
   if (caminho === "eleicoes/ativa" && metodo === "GET") return eleicaoAtiva(s);
   if (caminho === "votos" && metodo === "POST") return votar(req, s);
 
-  const mEleicao = caminho.match(/^eleicoes\/([^/]+)\/(abrir|encerrar|candidatos|progresso)$/);
+  const mEleicao = caminho.match(/^eleicoes\/([^/]+)\/(abrir|encerrar|candidatos|progresso|apurar|ata)$/);
   if (mEleicao) {
     const [, id, acao] = mEleicao;
+    if (acao === "ata" && metodo === "GET") return ataEleicao(id, s);
     if (acao === "abrir" && metodo === "POST") return abrirEleicao(id, s);
     if (acao === "encerrar" && metodo === "POST") return encerrarEleicao(id, s);
     if (acao === "candidatos" && metodo === "POST") return definirCandidato(id, req, s);
     if (acao === "progresso" && metodo === "GET") return progresso(id, s);
+    if (acao === "apurar" && metodo === "POST") return apurarEleicao(id, s);
   }
 
   return erro("Rota não encontrada", 404);

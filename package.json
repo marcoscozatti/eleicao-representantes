@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "@netlify/blobs": "^8.0.0",
-    "bcryptjs": "^2.4.3"
+    "bcryptjs": "^2.4.3",
+    "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "@netlify/functions": "^2.8.0",

@@ -136,6 +136,27 @@ $("form-eleicao").addEventListener("submit", async (ev) => {
   }
 });
 
+// Mostra o resultado da apuração (ou o aviso de segundo turno)
+function mostrarResultado(r) {
+  const pre = $("resultado-apuracao");
+  if (!r.resultado) {
+    pre.hidden = true;
+    return msg(r.mensagem || `Situação: ${r.status}.`);
+  }
+  const x = r.resultado;
+  const linhas = [
+    x.eleito
+      ? `Representante: ${x.eleito.nome} (nº ${x.eleito.numero})${x.desempatadoPorSorteio ? " — escolhido por sorteio" : ""}`
+      : "Sem representante eleito (nenhum voto válido).",
+    ...x.suplentes.map((s) => `Suplente ${s.ordem}: ${s.nome} (nº ${s.numero}, ${s.votos} votos)`),
+    x.desempateSuplentesPorSorteio ? "Empate entre suplentes desempatado por sorteio." : "",
+    `Brancos: ${x.brancos}. Rodadas: ${x.rodadas}.`,
+  ].filter(Boolean);
+  pre.textContent = linhas.join("\n");
+  pre.hidden = false;
+  msg("Apuração concluída.");
+}
+
 // Ações sobre a eleição: informe o ID e clique no botão desejado
 document.querySelectorAll("[data-acao]").forEach((b) =>
   b.addEventListener("click", async () => {
@@ -145,7 +166,25 @@ document.querySelectorAll("[data-acao]").forEach((b) =>
     try {
       if (acao === "progresso") {
         const p = await api(`eleicoes/${id}/progresso`, { token });
-        msg(`Votaram ${p.votaram} de ${p.total} eleitores.`);
+        msg(`Votaram ${p.votaram} de ${p.total} eleitores${p.rodada > 1 ? ` (segundo turno)` : ""}.`);
+      } else if (acao === "apurar") {
+        const r = await api(`eleicoes/${id}/apurar`, { metodo: "POST", token });
+        mostrarResultado(r);
+        await carregarEleicoes();
+      } else if (acao === "ata") {
+        // A ata exige o token no cabeçalho, por isso o download é feito com fetch
+        const res = await fetch(`/api/eleicoes/${id}/ata`, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) {
+          const dados = await res.json().catch(() => ({}));
+          throw new Error(dados.erro || "Não foi possível gerar a ata.");
+        }
+        const url = URL.createObjectURL(await res.blob());
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "ata-eleicao.pdf";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        msg("Ata gerada.");
       } else {
         const r = await api(`eleicoes/${id}/${acao}`, { metodo: "POST", token });
         msg(`Situação: ${r.status}${r.eleitores !== undefined ? ` (${r.eleitores} eleitores)` : ""}.`);
