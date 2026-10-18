@@ -9,6 +9,18 @@ function mostrarTela(id) {
   for (const t of ["tela-login", "tela-urna", "tela-fim"]) $(t).hidden = t !== id;
 }
 
+// A foto exige o token no cabeçalho Authorization, e a tag <img> não envia esse cabeçalho.
+// Por isso a foto é buscada com fetch e exibida por uma URL local (blob).
+const fotosCache = new Map();
+async function urlDaFoto(url) {
+  if (!fotosCache.has(url)) {
+    const r = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) throw new Error(`Foto indisponível (${r.status})`);
+    fotosCache.set(url, URL.createObjectURL(await r.blob()));
+  }
+  return fotosCache.get(url);
+}
+
 function atualizarVisor() {
   const visor = $("visor-numero");
   visor.textContent = digitos.padEnd(2, "_");
@@ -18,11 +30,17 @@ function atualizarVisor() {
     area.hidden = false;
     $("visor-nome").textContent = candidato.nome;
     const foto = $("visor-foto");
+    foto.hidden = true;
     if (candidato.fotoUrl) {
-      foto.src = candidato.fotoUrl;
-      foto.hidden = false;
-    } else {
-      foto.hidden = true;
+      urlDaFoto(candidato.fotoUrl)
+        .then((src) => {
+          // Só exibe se o candidato digitado ainda for este
+          if (String(candidato.numero) === digitos) {
+            foto.src = src;
+            foto.hidden = false;
+          }
+        })
+        .catch((err) => console.error(err));
     }
   } else {
     area.hidden = true;
