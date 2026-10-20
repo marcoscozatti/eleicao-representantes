@@ -1,6 +1,7 @@
 // Ata da eleição preenchida no modelo oficial (planilha .xlsx).
 // O modelo é mantido como está: só os valores são preenchidos, sem mexer no desenho.
-import { Workbook, type Cell } from "exceljs";
+// exceljs é CommonJS: no Netlify (ESM) só funciona com o import padrão
+import ExcelJS, { type Cell } from "exceljs";
 import { MODELO_ATA_B64 } from "./modelo-ata";
 
 export type Contato = { nome: string; celular: string; email: string };
@@ -30,7 +31,7 @@ function definirData(celula: Cell, iso: string) {
 }
 
 export async function gerarAtaXlsx(d: DadosAtaXlsx): Promise<ArrayBuffer> {
-  const wb = new Workbook();
+  const wb = new ExcelJS.Workbook();
   // Tipos do exceljs são de uma versão antiga do Node; o conteúdo é um .xlsx normal
   await wb.xlsx.load(Buffer.from(MODELO_ATA_B64, "base64") as any);
   const ws = wb.worksheets[0]!;
