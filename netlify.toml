@@ -5,8 +5,6 @@
 
 [functions]
   node_bundler = "esbuild"
-  # exceljs é carregado direto do node_modules: empacotado, a função falha ao iniciar no Netlify
-  external_node_modules = ["exceljs"]
   included_files = []
 
 [[headers]]
