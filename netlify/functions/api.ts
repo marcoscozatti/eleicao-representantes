@@ -4,7 +4,7 @@ import type { Config, Context } from "@netlify/functions";
 import { getStore } from "@netlify/blobs";
 import bcrypt from "bcryptjs";
 import { randomInt, randomUUID } from "node:crypto";
-import { gerarAta, type DadosAta } from "./ata-pdf";
+import { gerarAtaXlsx, type DadosAtaXlsx, type Contato } from "./ata-xlsx";
 
 // ---------- Configuração ----------
 const SESSAO_HORAS = 12;
@@ -64,12 +64,32 @@ async function chaves(prefixo: string): Promise<string[]> {
 }
 
 // ---------- Rotas de autenticação ----------
+// Senha do professor: vale a senha trocada pelo painel (guardada com hash);
+// enquanto nenhuma foi trocada, vale a variável ADMIN_PASSWORD do Netlify.
+async function senhaProfessorValida(senha: string): Promise<boolean> {
+  const cfg = (await store().get("config/professor", { type: "json" })) as { senhaHash?: string } | null;
+  if (cfg?.senhaHash) return bcrypt.compare(senha, cfg.senhaHash);
+  return !!process.env.ADMIN_PASSWORD && senha === process.env.ADMIN_PASSWORD;
+}
+
 async function loginProfessor(req: Request) {
   const { senha } = await corpo<{ senha?: string }>(req);
-  if (!senha || senha !== process.env.ADMIN_PASSWORD) {
+  if (!senha || !(await senhaProfessorValida(senha))) {
     return erro("Senha inválida", 401);
   }
   return json({ token: await criarSessao("professor") });
+}
+
+async function trocarSenhaProfessor(req: Request, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const { atual, nova } = await corpo<{ atual?: string; nova?: string }>(req);
+  if (!atual || !(await senhaProfessorValida(atual))) return erro("Senha atual incorreta", 401);
+  if (!nova || nova.length < 8) return erro("A nova senha deve ter pelo menos 8 caracteres", 400);
+  await store().setJSON("config/professor", {
+    senhaHash: await bcrypt.hash(nova, 10),
+    alteradaEm: new Date().toISOString(),
+  });
+  return json({ ok: true });
 }
 
 async function loginAluno(req: Request) {
@@ -78,7 +98,7 @@ async function loginAluno(req: Request) {
     ? (await store().get(`aluno/${matricula.trim()}`, { type: "json" })) as
         | { senhaHash: string } | null
     : null;
-  if (!aluno || !senha || !(await bcrypt.compare(senha, aluno.senhaHash))) {
+  if (!aluno || (aluno as { excluidoEm?: string }).excluidoEm || !senha || !(await bcrypt.compare(senha, aluno.senhaHash))) {
     return erro("Matrícula ou senha inválida", 401);
   }
   return json({ token: await criarSessao("aluno", matricula!.trim()) });
@@ -188,7 +208,7 @@ async function novasSenhasDaTurma(turmaId: string, s: Sessao | null) {
   const alunos = await Promise.all(
     (await chaves("aluno/")).map((k) => store().get(k, { type: "json" }) as Promise<any>)
   );
-  const daTurma = alunos.filter((a) => a.turmaId === turmaId);
+  const daTurma = alunos.filter((a) => a.turmaId === turmaId && !a.excluidoEm);
   if (daTurma.length === 0) return erro("Nenhum aluno nesta turma", 404);
 
   const resultados: { matricula: string; nome: string; senha: string }[] = [];
@@ -249,7 +269,7 @@ async function listarAlunos(req: Request, s: Sessao | null) {
   );
   return json(
     alunos
-      .filter((a) => !turmaId || a.turmaId === turmaId)
+      .filter((a) => !a.excluidoEm && (!turmaId || a.turmaId === turmaId))
       .map(({ senhaHash, ...publico }) => publico)
       .sort((a, b) => a.nome.localeCompare(b.nome))
   );
@@ -337,7 +357,7 @@ async function abrirEleicao(id: string, s: Sessao | null) {
   const alunos = await Promise.all(
     (await chaves("aluno/")).map((k) => store().get(k, { type: "json" }) as Promise<any>)
   );
-  const eleitores = alunos.filter((a) => a.turmaId === e.turmaId).map((a) => a.matricula);
+  const eleitores = alunos.filter((a) => a.turmaId === e.turmaId && !a.excluidoEm).map((a) => a.matricula);
   await store().setJSON(`eleitores/${id}`, eleitores);
 
   e.status = "aberta";
@@ -543,7 +563,7 @@ async function apagarTudo(req: Request, s: Sessao | null) {
   return json({ apagados: chavesTodas.length });
 }
 
-// Ata em PDF. Só existe depois da apuração; os dados vêm do resultado guardado na eleição.
+// Ata da eleição em planilha (modelo oficial). Só existe depois da apuração.
 async function ataEleicao(id: string, s: Sessao | null) {
   if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
   const e = await carregarEleicao(id);
@@ -552,34 +572,111 @@ async function ataEleicao(id: string, s: Sessao | null) {
     return erro("A ata só pode ser gerada depois da apuração", 409);
   }
 
-  const turma = (await store().get(`turma/${e.turmaId}`, { type: "json" })) as { nome?: string; curso?: string } | null;
-  const eleitores = ((await store().get(`eleitores/${id}`, { type: "json" })) as string[]) ?? [];
-  const candidatos = await Promise.all(
-    e.candidatos.map(async (c) => {
-      const a = (await store().get(`aluno/${c.matricula}`, { type: "json" })) as { nome?: string } | null;
-      return { numero: c.numero, nome: a?.nome ?? c.matricula };
-    })
-  );
+  const turma = (await store().get(`turma/${e.turmaId}`, { type: "json" })) as
+    | { nome?: string; curso?: string; oferta?: string; horario?: string } | null;
+  const matriculasEleitores = ((await store().get(`eleitores/${id}`, { type: "json" })) as string[]) ?? [];
+  const alunoDe = async (matricula: string) =>
+    (await store().get(`aluno/${matricula}`, { type: "json" })) as
+      | { nome?: string; celular?: string | null; email?: string | null } | null;
 
-  const dados: DadosAta = {
-    turma: turma ? [turma.nome, turma.curso].filter(Boolean).join(" — ") : "",
+  // Contato de quem foi eleito, a partir do cadastro do aluno
+  const contatoDoNumero = async (numero: number): Promise<Contato | null> => {
+    const c = e.candidatos.find((x) => x.numero === numero);
+    if (!c) return null;
+    const a = await alunoDe(c.matricula);
+    return { nome: a?.nome ?? c.matricula, celular: a?.celular ?? "", email: a?.email ?? "" };
+  };
+  const r = e.resultado;
+  const titular = r.eleito ? await contatoDoNumero(r.eleito.numero) : null;
+  const suplentes: Contato[] = [];
+  for (const sup of r.suplentes) {
+    const c = await contatoDoNumero(sup.numero);
+    if (c) suplentes.push(c);
+  }
+
+  // Lista de assinatura: eleitores da eleição, em ordem alfabética, sem alunos excluídos
+  const assinantes: string[] = [];
+  for (const m of matriculasEleitores) {
+    const a = await alunoDe(m);
+    if (a && !(a as { excluidoEm?: string }).excluidoEm) assinantes.push(a.nome ?? m);
+  }
+  assinantes.sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  const dados: DadosAtaXlsx = {
     dataEleicao: e.dataEleicao,
     mandatoInicio: e.mandatoInicio,
     mandatoFim: e.mandatoFim,
-    eleitores: eleitores.length,
-    rodadas: e.historico.map((h) => ({ rodada: h.rodada, votos: h.votos, brancos: h.brancos, contagem: h.contagem })),
-    candidatos,
-    eleito: e.resultado.eleito,
-    desempatadoPorSorteio: e.resultado.desempatadoPorSorteio,
-    suplentes: e.resultado.suplentes,
-    desempateSuplentesPorSorteio: e.resultado.desempateSuplentesPorSorteio,
-    geradaEm: new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
+    curso: turma?.curso ?? "",
+    turma: turma?.nome ?? "",
+    oferta: turma?.oferta ?? "",
+    horario: turma?.horario ?? "",
+    titular,
+    suplentes,
+    assinantes,
   };
-  const pdf = await gerarAta(dados);
-  return new Response(pdf, {
+  const planilha = await gerarAtaXlsx(dados);
+  const nomeArquivo = `ata-representantes-${(turma?.nome ?? "turma").replace(/[^\w-]+/g, "-")}.xlsx`;
+  return new Response(planilha, {
     headers: {
-      "content-type": "application/pdf",
-      "content-disposition": `attachment; filename="ata-eleicao-${id}.pdf"`,
+      "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "content-disposition": `attachment; filename="${nomeArquivo}"`,
+      "cache-control": "no-store",
+    },
+  });
+}
+
+// ---------- Manutenção de alunos ----------
+// Edita nome, e-mail e celular. Senha e foto não mudam aqui.
+async function editarAluno(matricula: string, req: Request, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const aluno = (await store().get(`aluno/${matricula}`, { type: "json" })) as any;
+  if (!aluno || aluno.excluidoEm) return erro("Aluno não encontrado", 404);
+  const d = await corpo<{ nome?: string; email?: string; celular?: string }>(req);
+  const novo = { ...aluno };
+  if (d.nome !== undefined) {
+    if (!d.nome.trim()) return erro("O nome não pode ficar vazio", 400);
+    novo.nome = d.nome.trim();
+  }
+  if (d.email !== undefined) novo.email = d.email.trim() || null;
+  if (d.celular !== undefined) novo.celular = d.celular.trim() || null;
+  await store().setJSON(`aluno/${matricula}`, novo);
+  return json({ matricula, nome: novo.nome, email: novo.email ?? null, celular: novo.celular ?? null });
+}
+
+// "Excluir" não apaga nada: marca o aluno como excluído. Ele some das listas e não consegue votar.
+// Os dados continuam guardados no banco.
+async function excluirAluno(matricula: string, s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const aluno = (await store().get(`aluno/${matricula}`, { type: "json" })) as any;
+  if (!aluno || aluno.excluidoEm) return erro("Aluno não encontrado", 404);
+  await store().setJSON(`aluno/${matricula}`, { ...aluno, excluidoEm: new Date().toISOString() });
+  return json({ ok: true, matricula });
+}
+
+// ---------- Backup (professor) ----------
+// Gera um arquivo com todos os dados guardados, inclusive as fotos. Não altera nada.
+async function backup(s: Sessao | null) {
+  if (s?.papel !== "professor") return erro("Acesso restrito ao professor", 401);
+  const todas = await store().list();
+  const registros: Record<string, unknown> = {};
+  for (const { key } of todas.blobs) {
+    if (key.startsWith("foto/")) {
+      const m = await store().getWithMetadata(key, { type: "arrayBuffer" });
+      if (m) {
+        registros[key] = {
+          contentType: (m.metadata?.contentType as string) ?? "image/jpeg",
+          base64: Buffer.from(m.data as ArrayBuffer).toString("base64"),
+        };
+      }
+    } else {
+      registros[key] = await store().get(key, { type: "json" });
+    }
+  }
+  const geradoEm = new Date().toISOString();
+  return new Response(JSON.stringify({ geradoEm, registros }, null, 2), {
+    headers: {
+      "content-type": "application/json",
+      "content-disposition": `attachment; filename="backup-eleicao-${geradoEm.slice(0, 10)}.json"`,
       "cache-control": "no-store",
     },
   });
@@ -599,6 +696,8 @@ export default async (req: Request, _context: Context) => {
 
   // Apagar tudo (professor)
   if (caminho === "admin/apagar-tudo" && metodo === "POST") return apagarTudo(req, s);
+  if (caminho === "admin/senha" && metodo === "POST") return trocarSenhaProfessor(req, s);
+  if (caminho === "admin/backup" && metodo === "GET") return backup(s);
 
   // Turmas
   if (caminho === "turmas" && metodo === "POST") return criarTurma(req, s);
@@ -612,6 +711,9 @@ export default async (req: Request, _context: Context) => {
   const mFotoAluno = caminho.match(/^alunos\/([^/]+)\/foto$/);
   if (mFotoAluno && metodo === "POST") return enviarFoto(decodeURIComponent(mFotoAluno[1]), req, s);
   if (caminho === "alunos" && metodo === "GET") return listarAlunos(req, s);
+  const mAluno = caminho.match(/^alunos\/([^/]+)$/);
+  if (mAluno && metodo === "PATCH") return editarAluno(decodeURIComponent(mAluno[1]), req, s);
+  if (mAluno && metodo === "DELETE") return excluirAluno(decodeURIComponent(mAluno[1]), s);
 
   // Fotos
   const mFoto = caminho.match(/^fotos\/([^/]+)$/);

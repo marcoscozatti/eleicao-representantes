@@ -80,17 +80,30 @@ function renderTurmas() {
     : "<li>Nenhuma turma cadastrada.</li>";
 }
 
+// Tabela de alunos. No passo 2 ela traz as ações de editar e excluir.
+function tabelaAlunos(lista, comAcoes) {
+  if (!lista.length) return '<p class="ajuda">Nenhum aluno nesta turma ainda.</p>';
+  const cabecalho = `<tr><th>Matrícula</th><th>Nome</th><th>Celular</th><th>E-mail</th><th>Foto</th>${comAcoes ? "<th>Ações</th>" : ""}</tr>`;
+  const linhas = lista.map((a) => `<tr>
+      <td>${esc(a.matricula)}</td>
+      <td>${esc(a.nome)}</td>
+      <td>${esc(a.celular) || "—"}</td>
+      <td>${esc(a.email) || "—"}</td>
+      <td>${a.fotoKey ? '<span class="badge badge-ok">com foto</span>' : '<span class="badge badge-alerta">sem foto</span>'}</td>
+      ${comAcoes ? `<td class="acoes-linha">
+        <button class="link" data-editar="${esc(a.matricula)}">Editar</button>
+        <button class="link" data-excluir="${esc(a.matricula)}" style="color:#b3261e">Excluir</button>
+      </td>` : ""}
+    </tr>`).join("");
+  return `<table class="tabela"><thead>${cabecalho}</thead><tbody>${linhas}</tbody></table>`;
+}
+
 // Lista de alunos da turma escolhida, com a situação da foto
 function renderAlunos() {
   const lista = alunosDaTurma(turmaSel());
-  const linhas = lista.map((a) => `<tr><td>${esc(a.matricula)}</td><td>${esc(a.nome)}</td>
-    <td>${a.fotoKey ? '<span class="badge badge-ok">com foto</span>' : '<span class="badge badge-alerta">sem foto</span>'}</td></tr>`).join("");
-  const tabela = lista.length
-    ? `<table class="tabela"><thead><tr><th>Matrícula</th><th>Nome</th><th>Foto</th></tr></thead><tbody>${linhas}</tbody></table>`
-    : '<p class="ajuda">Nenhum aluno nesta turma ainda.</p>';
-  $("tabela-alunos-2").innerHTML = tabela;
+  $("tabela-alunos-2").innerHTML = tabelaAlunos(lista, true);
   const comFoto = lista.filter((a) => a.fotoKey).length;
-  $("tabela-fotos").innerHTML = `<p class="ajuda">${comFoto} de ${lista.length} aluno(s) com foto.</p>${tabela}`;
+  $("tabela-fotos").innerHTML = `<p class="ajuda">${comFoto} de ${lista.length} aluno(s) com foto.</p>${tabelaAlunos(lista, false)}`;
 }
 
 function renderEleicoes() {
@@ -139,7 +152,7 @@ function renderAcoes() {
     rascunho: "Confira os candidatos e clique em 1. Abrir votação. Depois disso, os alunos já podem votar.",
     aberta: "A votação está aberta. Acompanhe o progresso e clique em 2. Encerrar votação quando terminar.",
     aguardando_apuracao: "Votação encerrada. Clique em 3. Apurar para contar os votos.",
-    apurada: "Apuração concluída. Baixe a ata em PDF antes de apagar os dados.",
+    apurada: "Apuração concluída. Baixe a ata em planilha (.xlsx) antes de apagar os dados.",
   };
   $("dica-acao").textContent = e ? dicas[st] : "Escolha ou crie uma eleição no passo 4.";
   const habilitar = {
@@ -470,10 +483,10 @@ async function baixarAta(id) {
   const url = URL.createObjectURL(await res.blob());
   const link = document.createElement("a");
   link.href = url;
-  link.download = "ata-eleicao.pdf";
+  link.download = "ata-eleicao.xlsx";
   link.click();
   setTimeout(() => URL.revokeObjectURL(url), 10000);
-  msg("Ata gerada.");
+  msg("Ata gerada em planilha (.xlsx).");
 }
 
 document.querySelectorAll("[data-acao]").forEach((b) =>
@@ -501,7 +514,93 @@ document.querySelectorAll("[data-acao]").forEach((b) =>
   })
 );
 
-// ---------- Passo 7: apagar tudo ----------
+// ---------- Passo 2: editar e excluir aluno ----------
+let matriculaEditada = null;
+
+function fecharEdicao() {
+  matriculaEditada = null;
+  $("form-editar-aluno").reset();
+  $("bloco-editar").hidden = true;
+}
+
+function abrirEdicao(matricula) {
+  const a = alunos.find((x) => x.matricula === matricula);
+  if (!a) return;
+  matriculaEditada = matricula;
+  const f = $("form-editar-aluno");
+  f.nome.value = a.nome ?? "";
+  f.email.value = a.email ?? "";
+  f.celular.value = a.celular ?? "";
+  $("editar-matricula").textContent = `Matrícula ${a.matricula}`;
+  $("bloco-editar").hidden = false;
+  $("bloco-editar").scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
+$("form-editar-aluno").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  if (!matriculaEditada) return;
+  const f = new FormData(ev.target);
+  try {
+    await api(`alunos/${encodeURIComponent(matriculaEditada)}`, {
+      metodo: "PATCH",
+      token,
+      corpo: { nome: f.get("nome"), email: f.get("email"), celular: f.get("celular") },
+    });
+    fecharEdicao();
+    await carregarTudo();
+    msg("Dados do aluno atualizados.");
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
+$("btn-cancelar-edicao").addEventListener("click", fecharEdicao);
+
+async function excluirAlunoAdmin(matricula) {
+  const a = alunos.find((x) => x.matricula === matricula);
+  const aviso = `Remover ${a?.nome ?? matricula} (matrícula ${matricula}) da lista?\n\n` +
+    "O aluno não poderá mais votar. Os dados continuam guardados no banco, mas essa matrícula não poderá ser cadastrada de novo.";
+  if (!confirm(aviso)) return;
+  await api(`alunos/${encodeURIComponent(matricula)}`, { metodo: "DELETE", token });
+  if (matriculaEditada === matricula) fecharEdicao();
+  await carregarTudo();
+  msg("Aluno removido da lista. Os dados foram preservados no banco.");
+}
+
+// ---------- Passo 7: segurança e backup ----------
+$("form-senha").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = new FormData(ev.target);
+  if (f.get("nova") !== f.get("repita")) return msg("A confirmação não confere com a nova senha.", false);
+  try {
+    await api("admin/senha", { metodo: "POST", token, corpo: { atual: f.get("atual"), nova: f.get("nova") } });
+    ev.target.reset();
+    msg("Senha do professor alterada. Use a nova senha no próximo acesso.");
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
+$("btn-backup").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/admin/backup", { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      const dados = await res.json().catch(() => ({}));
+      throw new Error(dados.erro || "Não foi possível gerar o backup.");
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "backup-eleicao.json";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    msg("Backup baixado. Guarde o arquivo em local seguro.");
+  } catch (err) {
+    msg(err.message, false);
+  }
+});
+
+// ---------- Passo 8: apagar tudo ----------
 $("btn-apagar-tudo").addEventListener("click", async () => {
   const digitado = prompt("Para apagar TODOS os dados, digite exatamente: APAGAR TUDO");
   if (digitado !== "APAGAR TUDO") return msg("Operação cancelada.", false);
@@ -520,6 +619,11 @@ $("btn-apagar-tudo").addEventListener("click", async () => {
 
 // ---------- Navegação (botões dos passos, banner e listas) ----------
 document.addEventListener("click", (ev) => {
+  const editar = ev.target.closest("[data-editar]");
+  if (editar) return abrirEdicao(editar.dataset.editar);
+  const excluir = ev.target.closest("[data-excluir]");
+  if (excluir) return excluirAlunoAdmin(excluir.dataset.excluir).catch((err) => msg(err.message, false));
+
   const t = ev.target.closest("[data-ir],[data-proximo],[data-anterior],[data-usar]");
   if (!t) return;
   if (t.dataset.usar) {

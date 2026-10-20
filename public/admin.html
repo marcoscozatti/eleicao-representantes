@@ -38,7 +38,8 @@
         <li><button data-ir="4"><span class="bolinha">4</span><span class="rotulo">Eleição</span></button></li>
         <li><button data-ir="5"><span class="bolinha">5</span><span class="rotulo">Candidatos</span></button></li>
         <li><button data-ir="6"><span class="bolinha">6</span><span class="rotulo">Ações da eleição</span></button></li>
-        <li><button data-ir="7"><span class="bolinha">7</span><span class="rotulo">Apagar dados</span></button></li>
+        <li><button data-ir="7"><span class="bolinha">7</span><span class="rotulo">Segurança e backup</span></button></li>
+        <li><button data-ir="8"><span class="bolinha">8</span><span class="rotulo">Apagar dados</span></button></li>
       </ol>
     </nav>
 
@@ -106,7 +107,22 @@
 
         <div class="bloco">
           <h3>Alunos da turma</h3>
+          <p class="ajuda">Use <strong>Editar</strong> para preencher ou corrigir celular e e-mail. <strong>Excluir</strong> tira o aluno da lista e impede o voto, mas os dados continuam guardados no banco.</p>
           <div id="tabela-alunos-2"></div>
+        </div>
+
+        <div id="bloco-editar" class="bloco" hidden>
+          <h3>Editar aluno</h3>
+          <p id="editar-matricula" class="ajuda"></p>
+          <form id="form-editar-aluno" class="formulario">
+            <label>Nome completo <input name="nome" required></label>
+            <label>E-mail <input name="email" type="email"></label>
+            <label>Celular <input name="celular"></label>
+            <div class="acoes">
+              <button type="submit" class="btn-primario">Salvar alterações</button>
+              <button type="button" id="btn-cancelar-edicao" class="btn-secundario">Cancelar</button>
+            </div>
+          </form>
         </div>
 
         <div class="passo-rodape">
@@ -185,23 +201,47 @@
           <button data-acao="progresso" class="acao-secundaria">Ver progresso</button>
           <button data-acao="encerrar">2. Encerrar votação</button>
           <button data-acao="apurar">3. Apurar</button>
-          <button data-acao="ata">4. Baixar ata (PDF)</button>
+          <button data-acao="ata">4. Baixar ata (planilha .xlsx)</button>
         </div>
         <pre id="resultado-apuracao" hidden></pre>
         <div class="passo-rodape">
           <button class="btn-secundario" data-anterior="5">← Voltar</button>
-          <button class="btn-primario" data-proximo="7">Próximo: apagar dados →</button>
+          <button class="btn-primario" data-proximo="7">Próximo: segurança →</button>
         </div>
       </div>
 
-      <!-- PASSO 7: Apagar dados -->
+      <!-- PASSO 7: Segurança e backup -->
       <div data-passo="7" hidden>
-        <h2>7. Apagar dados</h2>
-        <p class="passo-intro">Use ao final da eleição, depois de baixar a ata. Apaga alunos, fotos, turmas, eleições e votos.</p>
-        <p class="aviso-senha">Não tem volta. Antes de apagar, confirme que a ata em PDF já está salva.</p>
-        <div class="acoes"><button id="btn-apagar-tudo" class="acoes-perigo">Apagar todos os dados</button></div>
+        <h2>7. Segurança e backup</h2>
+        <div class="bloco">
+          <h3>Trocar a senha do professor</h3>
+          <form id="form-senha" class="formulario">
+            <label>Senha atual <input name="atual" type="password" required></label>
+            <label>Nova senha (mín. 8 caracteres) <input name="nova" type="password" required minlength="8"></label>
+            <label>Repita a nova senha <input name="repita" type="password" required minlength="8"></label>
+            <div><button type="submit" class="btn-primario">Trocar senha</button></div>
+          </form>
+          <p class="ajuda">Guarde a nova senha em local seguro. Se ela for esquecida, o acesso só pode ser restabelecido por quem tem acesso ao banco de dados do site.</p>
+        </div>
+        <div class="bloco">
+          <h3>Backup dos dados</h3>
+          <p class="ajuda">Baixa um arquivo com todos os registros: turmas, alunos, fotos, eleições e votos. Faça um backup antes de qualquer mudança grande.</p>
+          <div class="acoes"><button id="btn-backup" class="acoes-botao">Baixar backup (.json)</button></div>
+        </div>
         <div class="passo-rodape">
           <button class="btn-secundario" data-anterior="6">← Voltar</button>
+          <button class="btn-primario" data-proximo="8">Próximo: apagar dados →</button>
+        </div>
+      </div>
+
+      <!-- PASSO 8: Apagar dados -->
+      <div data-passo="8" hidden>
+        <h2>8. Apagar dados</h2>
+        <p class="passo-intro">Use ao final da eleição, depois de baixar a ata e o backup. Apaga alunos, fotos, turmas, eleições e votos.</p>
+        <p class="aviso-senha">Não tem volta. Antes de apagar, confirme que a ata em planilha e o backup já estão salvos.</p>
+        <div class="acoes"><button id="btn-apagar-tudo" class="acoes-perigo">Apagar todos os dados</button></div>
+        <div class="passo-rodape">
+          <button class="btn-secundario" data-anterior="7">← Voltar</button>
           <span></span>
         </div>
       </div>
